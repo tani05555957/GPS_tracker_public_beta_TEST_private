@@ -1487,6 +1487,15 @@
     let clusterRadiusM       = 15;    // クラスタリング半径(m)
     let secPerUnit           = 30;    // 1軒あたり想定所要秒数（UIスライダーで10-60秒の範囲で調整可能）
     const DISTRIBUTION_ESTIMATE_FACTOR = 2 / 3; // 推定配布数が実績より多めに出る傾向があるため一律で縮小補正する係数
+    // 世帯密度(戸/km2)による推定配布数の補正カーブ較正点。
+    // secPerUnitは1軒あたり所要時間を全国一律で仮定するため、複数軒が1クラスタに圧縮される高密度地域
+    // （マンション等）では推定が過小に、1軒ごとに最低1クラスタが保証される低密度地域（山間部）では
+    // 過大になる。実測（山間部 約50戸/km2で推定が実績の2倍→×0.5、住宅地 約3000戸/km2で推定が実績の
+    // 4割→×2.5）から、log10(密度)に対する線形カーブで補正する
+    const DENSITY_CORRECTION_LOW  = { density: 50,   factor: 0.5 };
+    const DENSITY_CORRECTION_HIGH = { density: 3000, factor: 2.5 };
+    const DENSITY_CORRECTION_MIN_FACTOR = 0.4; // 較正範囲外への外挿を抑えるクランプ下限
+    const DENSITY_CORRECTION_MAX_FACTOR = 4.0; // 較正範囲外への外挿を抑えるクランプ上限
     let cityKeyByTownCode    = {};    // 町丁目KEY_CODE → 市区町村key（境界データ読み込み時に構築）
     let townSetaiByCode      = {};    // 町丁目KEY_CODE → 世帯数(SETAI合計、境界shapefileのプロパティから直接集計)
     let townVisitUnits       = {};    // 町丁目KEY_CODE → 推定軸数（滞在時間/secPerUnitのクラスタをポイント・イン・ポリゴン判定して積算）
@@ -3033,7 +3042,7 @@
           const rt = document.createElement('span');
           rt.className = 'city-stat rate';
           rt.title = 'GPS滞在クラスタのポイント・イン・ポリゴン集計による推定配布数の、配布数(実績)に対する割合';
-          rt.textContent = hasHouseholds ? ms.rate.toFixed(1) + '%' : '—';
+          rt.textContent = hasHouseholds ? formatRate(ms.rate) : '—';
 
           row.appendChild(vs);
           row.appendChild(rt);
@@ -3489,6 +3498,12 @@
       return DEVICES.some(d => visibility[d.key]);
     }
 
+    // 充足率の表示用テキストを組み立てる。内部値（townDeliveryStats・CSVエクスポート）は100%超もそのまま保持するが、
+    // UI表示は100%を超えた分を切り捨てて「100.0%」とする
+    function formatRate(rate) {
+      return Math.min(100, rate).toFixed(1) + '%';
+    }
+
     // 境界ポリゴンのホバー吹き出し用詳細テキスト（市区町村/住所コードの町の両方から使う共通ヘルパー）
     function boundaryFeatureStatDetail(townCode) {
       if (!rateHeatmapVisible) return '';
@@ -3496,7 +3511,7 @@
       if (!stat) return '';
       const hasHouseholds = stat.households > 0;
       const visitsText = hasHouseholds ? `${stat.visits.toFixed(0)}軒` : '－';
-      const rateText = hasHouseholds ? `${stat.rate.toFixed(1)}%` : '－';
+      const rateText = hasHouseholds ? formatRate(stat.rate) : '－';
       return `世帯数 ${stat.households.toFixed(0)}｜配布数 ${visitsText}｜充足率 ${rateText}`;
     }
 
@@ -3577,10 +3592,21 @@
       await aggregateTownStats();
     }
 
+    // 世帯密度(戸/km2)から推定配布数の補正係数を求める（DENSITY_CORRECTION_LOW/HIGHの2点をlog10密度で線形補間・外挿し、
+    // MIN/MAX_FACTORでクランプする）。密度が不明・0の場合は無補正(1倍)を返す
+    function densityCorrectionFactor(densityPerKm2) {
+      if (!(densityPerKm2 > 0)) return 1;
+      const lo = DENSITY_CORRECTION_LOW, hi = DENSITY_CORRECTION_HIGH;
+      const t = (Math.log10(densityPerKm2) - Math.log10(lo.density)) / (Math.log10(hi.density) - Math.log10(lo.density));
+      const f = lo.factor + t * (hi.factor - lo.factor);
+      return Math.min(DENSITY_CORRECTION_MAX_FACTOR, Math.max(DENSITY_CORRECTION_MIN_FACTOR, f));
+    }
+
     // ----- 集計（軽量な数値集計。townVisitUnits×世帯数/配布数(実績)から再計算） -----
     // 住所コード（CSV）モード: townDeliveryStatsはtown.codeキーのまま住所コード欄のリストに表示
     // 境界設定モード: 町丁目単位の結果をcityKeyByTownCodeで市区町村単位へロールアップして境界設定欄のリストに表示
     async function aggregateTownStats() {
+      const areaByCode = computeTownAreaByCode();
       const stats = {};
       if (boundaryFeatureCount > 0) {
         if (csvMode) {
@@ -3593,12 +3619,17 @@
               if (matchCode(town.code, code)) { matchedCode = code; break; }
             }
             if (matchedCode !== null) {
-              const visits = Math.round(townVisitUnits[matchedCode] || 0);
               const distCount = town.distributionCount || 0;
               // 統計上世帯数は住所コードデータの列ではなく、境界shapefileのSETAIプロパティから取得する
               // （住所コードデータに世帯数の列が無くても表示できるようにするため）
               const households = townSetaiByCode[matchedCode] || 0;
-              // ユーザー合意事項: 配布率は100%でキャップせず実数のまま保持・表示する
+              // 世帯密度（世帯数÷ポリゴン面積）に応じて推定配布数を補正する
+              // （複数軒が1クラスタに圧縮される密集地は過小、1軒ごとに最低1クラスタ保証される過疎地は過大に出る傾向を補う）
+              const areaKm2 = (areaByCode[matchedCode] || 0) / 1e6;
+              const density = areaKm2 > 0 ? households / areaKm2 : 0;
+              const visits = Math.round((townVisitUnits[matchedCode] || 0) * densityCorrectionFactor(density));
+              // 配布率は100%でキャップせず実数のまま保持する（UI表示側でformatRateにより100%キャップする。
+              // CSVエクスポートは密度補正カーブ校正用の生データなのでキャップしない）
               // CSVの配布数（実績）が無い場合は世帯数按分による割合にフォールバックする
               const rate = distCount > 0
                 ? (visits / distCount) * 100
@@ -3612,8 +3643,10 @@
           // 境界設定モード: KEY_CODEそのままの粒度（SETAIも同じ粒度で取得済み）
           let processed = 0;
           for (const code in cityKeyByTownCode) {
-            const visits = Math.round(townVisitUnits[code] || 0);
             const households = townSetaiByCode[code] || 0;
+            const areaKm2 = (areaByCode[code] || 0) / 1e6;
+            const density = areaKm2 > 0 ? households / areaKm2 : 0;
+            const visits = Math.round((townVisitUnits[code] || 0) * densityCorrectionFactor(density));
             if (visits !== 0 || households !== 0) {
               const rate = households > 0 ? (visits / households) * 100 : 0;
               stats[code] = { households, visits, rate };
@@ -4084,7 +4117,7 @@
           const rt = document.createElement('span');
           rt.className = 'city-stat rate';
           rt.title = 'GPS滞在クラスタのポイント・イン・ポリゴン集計による推定配布数の、配布数(実績)に対する割合';
-          rt.textContent = hasHouseholds ? ms.rate.toFixed(1) + '%' : '—';
+          rt.textContent = hasHouseholds ? formatRate(ms.rate) : '—';
 
           row.appendChild(vs);
           row.appendChild(rt);
