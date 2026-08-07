@@ -1475,6 +1475,8 @@
     let townVisibility = {};      // code → bool
     let townFilterText = '';
     let csvMode = false;
+    let csvBoundaryFetchInProgress = false; // 住所コードCSV由来の境界データ自動取得（index+ジオメトリ）が進行中か。
+                                             // 取得完了前にupdateTownListが呼ばれても「失敗」と誤表示しないための判定に使う
 
     // 町丁目ポイントカウント配布率推定状態（メッシュを介さず、GPS滞在クラスタを直接町丁目ポリゴンに判定する）
     let rateHeatmapVisible   = false; // 推定配布率ヒートマップ（町丁目単位コロプレス）の表示/非表示
@@ -3821,8 +3823,16 @@
         // loadedPrefCodesではなくfullyFetchedPrefCodesで判定する）
         const neededPrefCodes = [...new Set(newTowns.map(t => t.code.slice(0, 2)))]
           .filter(c => /^\d{2}$/.test(c) && !fullyFetchedPrefCodes.has(c));
-        for (const prefCode of neededPrefCodes) {
-          await loadPrefectureByCode(prefCode, { auto: true });
+        if (neededPrefCodes.length) {
+          csvBoundaryFetchInProgress = true;
+          updateTownList();
+        }
+        try {
+          for (const prefCode of neededPrefCodes) {
+            await loadPrefectureByCode(prefCode, { auto: true });
+          }
+        } finally {
+          csvBoundaryFetchInProgress = false;
         }
 
         if (Object.keys(allFeaturesByCode).length > 0) {
@@ -3949,7 +3959,9 @@
       hdr.style.display = 'flex';
 
       if (Object.keys(allFeaturesByCode).length === 0) {
-        el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--text-muted);text-align:center">境界データの自動取得に失敗しました。インターネット接続を確認してください</div>';
+        el.innerHTML = csvBoundaryFetchInProgress
+          ? '<div style="padding:12px;font-size:11px;color:var(--text-muted);text-align:center">境界データを読み込み中...</div>'
+          : '<div style="padding:12px;font-size:11px;color:var(--text-muted);text-align:center">境界データの自動取得に失敗しました。インターネット接続を確認してください</div>';
         document.getElementById('cityCount').textContent = `${csvTowns.length}件`;
         updateBoundaryStepper();
         return;
