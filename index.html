@@ -1365,6 +1365,9 @@
         <div class="section-title">
           <span id="boundarySectionTitle">境界設定（都道府県）</span>
           <span class="count-badge" id="cityCount"></span>
+          <span class="section-title-actions" id="townStatsExportActions" style="display:none">
+            <button class="section-icon-btn" onclick="exportTownStatsCSV()" title="町丁目別の世帯数・実績配布数・推定配布数・面積をCSVでダウンロードします（密度補正カーブの校正用）">⬇</button>
+          </span>
         </div>
         <div id="boundaryControls">
           <div class="filter-area">
@@ -3649,6 +3652,9 @@
         rateBtn.style.display = hasRateData ? '' : 'none';
         if (!hasRateData && rateHeatmapVisible) rateBtn.classList.remove('active');
       }
+      // CSVモード（住所コード読み込み）で実績配布数と統計が揃っている場合のみ、密度補正カーブ校正用のエクスポートボタンを出す
+      const exportActions = document.getElementById('townStatsExportActions');
+      if (exportActions) exportActions.style.display = (csvMode && hasRateData) ? '' : 'none';
       // 集計結果が初めて得られたときだけ自動的にヒートマップをONにする（以降はユーザーの手動操作を尊重する）
       if (hasRateData && !rateAutoShown) {
         rateHeatmapVisible = true;
@@ -3659,6 +3665,54 @@
 
       applyBoundaryColorStyle();
       if (csvMode) updateTownList(); else if (boundaryLevel === 'pref') renderPrefStage(); else updateCityList();
+    }
+
+    // 町丁目KEY_CODE → ポリゴン面積(m^2、同一コードの飛び地は合算)。密度補正カーブの校正用エクスポートでのみ使う
+    function computeTownAreaByCode() {
+      const areaByCode = {};
+      if (typeof turf === 'undefined') return areaByCode;
+      for (const [code, features] of Object.entries(allFeaturesByCode)) {
+        let total = 0;
+        for (const f of features) {
+          if (!f.geometry) continue;
+          try { total += turf.area(f); } catch (e) { /* 不正なジオメトリはスキップ */ }
+        }
+        areaByCode[code] = total;
+      }
+      return areaByCode;
+    }
+
+    // 町丁目別の世帯数・実績配布数・推定配布数・面積・世帯密度をCSVでダウンロードする。
+    // 充足率ヒートマップの密度バイアス（マンション等の高密度地区で推定配布数が過小に出る傾向）を
+    // 実データで検証・補正カーブ校正するための元データとして使う
+    function exportTownStatsCSV() {
+      if (!csvTowns.length) return;
+      const areaByCode = computeTownAreaByCode();
+      const rows = [['住所コード', '都道府県', '市区町村', '町丁目名', '統計上世帯数', '配布数(実績)', '推定配布数', '充足率(%)', '面積(km2)', '世帯密度(戸/km2)']];
+      for (const town of csvTowns) {
+        const stat = townDeliveryStats[town.code];
+        const households = stat ? stat.households : 0;
+        const visits = stat ? Math.round(stat.visits) : '';
+        const rate = stat && stat.households > 0 ? stat.rate.toFixed(1) : '';
+        const areaKm2 = (areaByCode[town.code] || 0) / 1e6;
+        const density = areaKm2 > 0 ? Math.round(households / areaKm2) : '';
+        rows.push([
+          town.code, town.prefName, town.cityName, town.townName,
+          households || '', town.distributionCount || '', visits, rate,
+          areaKm2 ? areaKm2.toFixed(4) : '', density,
+        ]);
+      }
+      const csv = rows.map(r => r.map(v => {
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',')).join('\r\n');
+      const blob = new Blob([String.fromCharCode(0xFEFF) + csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '町丁目別配布データ.csv';
+      a.click();
+      URL.revokeObjectURL(url);
     }
 
     // ===== CSVレポート =====
