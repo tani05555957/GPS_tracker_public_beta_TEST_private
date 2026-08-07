@@ -1,0 +1,4996 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-WRX1SYCL8Q"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date());
+
+    gtag('config', 'G-WRX1SYCL8Q');
+  </script>
+
+  <title>GPSトラッカー</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap');
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #f6f2f2;
+      --surface: #ffffff;
+      --surface2: #f1ebeb;
+      --border: #ddd0d0;
+      --text: #1c1010;
+      --text-muted: #8a7272;
+      --accent: #8b1c1c;
+      --accent-h: #a52020;
+    }
+
+    html,
+    body {
+      height: 100%;
+      font-family: 'Noto Sans JP', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    /* ===== レイアウト ===== */
+    #app {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      grid-template-columns: var(--sidebar-w, 400px) 5px 1fr;
+      height: 100vh;
+    }
+
+    #sidebar-resizer {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      border-left: 1px solid var(--border);
+      cursor: col-resize;
+      position: relative;
+      z-index: 10;
+      transition: background 0.15s;
+    }
+
+    #sidebar-resizer:hover,
+    #sidebar-resizer.dragging {
+      background: var(--border);
+    }
+
+    /* ===== ヘッダー ===== */
+    #header {
+      grid-column: 1 / -1;
+      background: var(--surface);
+      border-bottom: 2px solid var(--accent);
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 2px 8px rgba(139, 28, 28, 0.08);
+      cursor: pointer;
+    }
+
+    .header-row {
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 10px;
+      height: 52px;
+      flex-shrink: 0;
+    }
+
+    #headerRow2 {
+      display: none;
+      height: 44px;
+      border-top: 1px solid var(--border);
+    }
+
+    #header.expanded #headerRow2 {
+      display: flex;
+    }
+
+    .logo {
+      font-family: 'Space Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+
+    #header h1 {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .header-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      padding: 6px 13px;
+      font-size: 12px;
+      font-family: 'Noto Sans JP', sans-serif;
+      cursor: pointer;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: background 0.18s;
+      flex-shrink: 0;
+    }
+
+    .header-btn:hover {
+      background: var(--accent-h);
+    }
+
+    .header-btn.secondary {
+      background: var(--surface2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .header-btn.secondary:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #fff5f5;
+    }
+
+    .header-btn.secondary.active {
+      background: #fef3c7;
+      color: #92400e;
+      border-color: #c8900a;
+      font-weight: 700;
+    }
+
+    .header-group {
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+
+    .header-group .header-btn:last-child {
+      display: none;
+    }
+
+    .header-group.loaded .header-btn:first-child {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+
+    .header-group.loaded .header-btn:last-child {
+      display: inline-flex;
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+      border-left: none;
+    }
+
+    #locationDisplay {
+      margin-left: auto;
+      background: var(--surface);
+      border: 1.5px solid var(--accent);
+      border-radius: 4px;
+      padding: 4px 12px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      font-family: 'Noto Sans JP', sans-serif;
+      white-space: nowrap;
+      flex-shrink: 0;
+      user-select: none;
+      cursor: pointer;
+      max-width: 460px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background 0.08s, color 0.08s, border-color 0.08s;
+    }
+
+    #locationDisplay.copied {
+      background: var(--text);
+      color: #fff;
+      border-color: var(--text);
+    }
+
+    /* ===== サイドバー ===== */
+    #sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .section-title {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      padding: 12px 14px 6px;
+      font-family: 'Space Mono', monospace;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .section-title:first-child {
+      border-top: none;
+    }
+
+    .count-badge {
+      background: #fff0f0;
+      border: 1px solid #f0cccc;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 10px;
+      color: var(--accent);
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .section-title-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 2px;
+    }
+
+    .section-icon-btn {
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+
+    .section-icon-btn:hover {
+      background: var(--surface2);
+      color: var(--accent);
+    }
+
+    /* コントロール共通 */
+    #deviceControls,
+    #boundaryControls {
+      flex-shrink: 0;
+    }
+
+    .filter-area {
+      padding: 0 12px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .filter-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--text);
+      font-family: 'Noto Sans JP', sans-serif;
+      outline: none;
+      transition: border-color 0.18s;
+    }
+
+    .filter-input:focus {
+      border-color: var(--accent);
+    }
+
+    .filter-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .filter-input-wrap {
+      position: relative;
+    }
+
+    .filter-input-wrap .filter-input {
+      padding-right: 26px;
+    }
+
+    .filter-clear-btn {
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 18px;
+      height: 18px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      border-radius: 4px;
+      padding: 0;
+    }
+
+    .filter-clear-btn:hover {
+      color: var(--text);
+      background: var(--surface2);
+    }
+
+    .filter-input:placeholder-shown ~ .filter-clear-btn {
+      display: none;
+    }
+
+    .bulk-btns {
+      display: flex;
+      gap: 5px;
+    }
+
+    .bulk-btn {
+      flex: 1;
+      padding: 5px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-family: 'Noto Sans JP', sans-serif;
+      cursor: pointer;
+      transition: all 0.15s;
+      text-align: center;
+    }
+
+    .bulk-btn:hover {
+      background: #fff0f0;
+      color: var(--accent);
+      border-color: #f0cccc;
+    }
+
+    .bulk-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .bulk-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    /* 端末カードリスト */
+    #deviceList {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding-bottom: 4px;
+    }
+
+    #deviceList::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    #deviceList::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #deviceList::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    /* 端末カード */
+    .device-card {
+      margin: 0 12px 4px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      transition: border-color 0.18s;
+      animation: fadeIn 0.2s ease both;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    }
+
+    .device-card.active {
+      border-color: var(--card-color);
+    }
+
+    .device-header {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 11px;
+      cursor: pointer;
+      user-select: none;
+      background: var(--surface);
+    }
+
+    .device-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--card-color);
+      flex-shrink: 0;
+      box-shadow: 0 0 5px var(--card-color);
+    }
+
+    .device-name {
+      font-size: 12px;
+      font-weight: 700;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .nodata-badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 1px 7px;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    .device-toggle {
+      width: 32px;
+      height: 17px;
+      border-radius: 9px;
+      background: var(--border);
+      position: relative;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+
+    .device-toggle::after {
+      content: '';
+      position: absolute;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #fff;
+      top: 3px;
+      left: 3px;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    .device-toggle.on {
+      background: var(--card-color);
+    }
+
+    .device-toggle.on::after {
+      transform: translateX(15px);
+    }
+
+    .device-toggle.partial {
+      background: var(--text-muted);
+    }
+
+    .device-toggle.partial::after {
+      transform: translateX(7px);
+    }
+
+    /* 市区町村ペイン 上下リサイズハンドル */
+    #city-resizer {
+      flex-shrink: 0;
+      height: 6px;
+      cursor: row-resize;
+      background: transparent;
+      display: block;
+      position: relative;
+      border-top: 1px solid var(--border);
+    }
+
+    #city-resizer::after {
+      content: '· · ·';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 8px;
+      color: var(--text-muted);
+      letter-spacing: 3px;
+      line-height: 1;
+    }
+
+    #city-resizer:hover,
+    #city-resizer.dragging {
+      background: var(--surface2);
+    }
+
+    /* 境界設定 - 市区町村ペイン */
+    #boundarySection {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      height: var(--city-pane-h, 320px);
+      min-height: 60px;
+      flex-shrink: 0;
+    }
+
+    #cityList {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 12px 8px;
+    }
+
+    #cityList::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    #cityList::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #cityList::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    .city-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 6px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.14s;
+      font-size: 12px;
+    }
+
+    .city-row:hover {
+      background: var(--surface2);
+    }
+
+    .city-toggle {
+      width: 28px;
+      height: 15px;
+      border-radius: 8px;
+      background: var(--border);
+      position: relative;
+      transition: background 0.2s;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .city-toggle::after {
+      content: '';
+      position: absolute;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #fff;
+      top: 3px;
+      left: 3px;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    }
+
+    .city-toggle.on {
+      background: #c8900a;
+    }
+
+    .city-toggle.on::after {
+      transform: translateX(13px);
+    }
+
+    .city-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .city-stat {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: 'Space Mono', monospace;
+      flex-shrink: 0;
+      text-align: right;
+      min-width: 34px;
+    }
+
+    #cityListHeader {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 12px 2px;
+      font-size: 9px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+
+    #cityListHeader .h-toggle {
+      width: 28px;
+      flex-shrink: 0;
+    }
+
+    #cityListHeader .h-name {
+      flex: 1;
+    }
+
+    #cityListHeader .h-stat {
+      min-width: 34px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .city-row.grayed {
+      opacity: 0.42;
+      pointer-events: none;
+    }
+
+    .city-row.grayed .city-toggle {
+      opacity: 0.3;
+    }
+
+    .city-stat.rate {
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    /* 濃度スライダー */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .slider-label,
+    .slider-val {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: 'Space Mono', monospace;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .slider-val {
+      min-width: 28px;
+      text-align: right;
+    }
+
+    .slider-row input[type=range] {
+      flex: 1;
+      min-width: 0;
+      accent-color: var(--accent);
+      cursor: pointer;
+      height: 4px;
+    }
+
+    /* ヘッダー下段の3スライダーはラベル文字数が違うため、flex:1のままだとスライダー本体の
+       見た目の長さがバラつく。固定幅にして3本とも同じ長さで揃える */
+    #secPerUnitRow input[type=range],
+    #restDurationRow input[type=range],
+    #transitSpeedRow input[type=range] {
+      flex: 0 0 auto;
+      width: 85px;
+    }
+
+
+    /* 空状態 */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 28px 16px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    .empty-icon {
+      font-size: 26px;
+      opacity: 0.35;
+    }
+
+    .empty-text {
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    /* 地図 */
+    #map {
+      background: #e8e4e4;
+    }
+
+    .leaflet-tile-pane {
+      filter: none;
+    }
+
+    .leaflet-control-zoom a {
+      background: #fff !important;
+      color: var(--text) !important;
+      border-color: var(--border) !important;
+    }
+
+    .leaflet-control-zoom a:hover {
+      background: var(--surface2) !important;
+    }
+
+    .leaflet-control-attribution {
+      background: rgba(255, 255, 255, 0.9) !important;
+      color: var(--text-muted) !important;
+      font-size: 10px !important;
+    }
+
+    .leaflet-control-attribution a {
+      color: var(--accent) !important;
+    }
+
+    /* ローディング */
+    #loading {
+      position: fixed;
+      inset: 0;
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 9999;
+      transition: opacity 0.4s;
+    }
+
+    #loading.hide {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    .loading-text {
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* プログレスバー */
+    #progress-bar {
+      display: none;
+      position: fixed;
+      top: 52px;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--border);
+      z-index: 1000;
+    }
+
+    #progress-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.15s ease;
+    }
+
+    /* CSV列選択モーダル */
+    #colPickModal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(28, 16, 16, 0.45);
+      z-index: 9500;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #colPickModal.show {
+      display: flex;
+    }
+
+    #colPickModal .cp-card {
+      background: var(--surface);
+      border-radius: 10px;
+      box-shadow: 0 3px 14px rgba(0, 0, 0, 0.18);
+      width: 420px;
+      max-width: 90vw;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #colPickModal .cp-header {
+      padding: 14px 18px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #colPickModal .cp-title {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    #colPickModal .cp-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    #colPickModal .cp-list {
+      overflow-y: auto;
+      padding: 6px 0;
+    }
+
+    #colPickModal .cp-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 8px 18px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    #colPickModal .cp-row:hover {
+      background: var(--surface2);
+    }
+
+    #colPickModal .cp-row .cp-idx {
+      flex-shrink: 0;
+      color: var(--text-muted);
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      min-width: 18px;
+    }
+
+    #colPickModal .cp-row .cp-head {
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    #colPickModal .cp-row .cp-sample {
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #colPickModal .cp-row.cp-none {
+      border-top: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+
+    #colPickModal .cp-footer {
+      padding: 8px 18px 14px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    /* セーブ/ロードモーダル */
+    #saveLoadModal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(28, 16, 16, 0.45);
+      z-index: 9500;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #saveLoadModal.show {
+      display: flex;
+    }
+
+    #saveLoadModal .cp-card {
+      background: var(--surface);
+      border-radius: 10px;
+      box-shadow: 0 3px 14px rgba(0, 0, 0, 0.18);
+      width: 440px;
+      max-width: 90vw;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #saveLoadModal .cp-header {
+      padding: 14px 18px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #saveLoadModal .cp-title {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    #saveLoadModal .cp-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    #saveLoadModal .cp-list {
+      overflow-y: auto;
+      padding: 6px 0;
+      min-height: 40px;
+    }
+
+    #saveLoadModal .sl-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 18px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.14s;
+    }
+
+    #saveLoadModal .sl-row:hover {
+      background: var(--surface2);
+    }
+
+    #saveLoadModal .sl-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    #saveLoadModal .sl-name {
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #saveLoadModal .sl-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: 'Space Mono', monospace;
+      margin-top: 2px;
+    }
+
+    #saveLoadModal .sl-del {
+      flex-shrink: 0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    #saveLoadModal .sl-del:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: #fff5f5;
+    }
+
+    #saveLoadModal .sl-empty {
+      padding: 18px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    #saveLoadModal .sl-newrow {
+      display: flex;
+      gap: 6px;
+      padding: 10px 18px;
+      border-top: 1px solid var(--border);
+    }
+
+    #saveLoadModal .sl-newrow input {
+      flex: 1;
+    }
+
+    #saveLoadModal .sl-name-input {
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-family: 'Noto Sans JP', sans-serif;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.18s;
+    }
+
+    #saveLoadModal .sl-name-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    #saveLoadModal .sl-name-input:focus {
+      border-color: var(--accent);
+    }
+
+    #saveLoadModal .cp-footer {
+      padding: 8px 18px 14px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    /* 情報吹き出し（自作div・全種類共通） */
+    #hover-tooltip {
+      position: fixed;
+      z-index: 9000;
+      background: rgba(255, 255, 255, 0.96);
+      color: #222;
+      border-radius: 5px;
+      padding: 6px 10px;
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      line-height: 1.55;
+      pointer-events: none;
+      display: none;
+      white-space: nowrap;
+      box-shadow: 0 3px 14px rgba(0, 0, 0, 0.18);
+      border: 1px solid rgba(0, 0, 0, 0.12);
+    }
+
+    #hover-tooltip .ht-label {
+      font-weight: 700;
+      margin-bottom: 1px;
+    }
+
+    #hover-tooltip .ht-time {
+      color: rgba(0, 0, 0, 0.50);
+      font-size: 10px;
+    }
+
+    /* 境界ポリゴンの町字名など、あくまで参考情報の表示用に控えめな見た目にする */
+    #hover-tooltip.ht-subtle {
+      background: rgba(255, 255, 255, 0.55);
+      border-color: rgba(0, 0, 0, 0.06);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+      padding: 4px 8px;
+    }
+
+    #hover-tooltip.ht-subtle .ht-label {
+      font-weight: 400;
+      font-size: 10px;
+      color: rgba(0, 0, 0, 0.55);
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(3px);
+      }
+
+      to {
+        opacity: 1;
+        transform: none;
+      }
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* ファイル別展開リスト */
+    .device-name-expandable {
+      cursor: pointer;
+    }
+
+    .device-name-expandable:hover {
+      color: var(--accent);
+    }
+
+    .device-file-list {
+      padding: 4px 8px 6px 28px;
+      background: var(--surface2);
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .file-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+
+    .file-row:hover {
+      background: rgba(0, 0, 0, 0.05);
+    }
+
+    .file-toggle {
+      width: 24px;
+      height: 13px;
+      border-radius: 7px;
+      background: var(--border);
+      position: relative;
+      transition: background 0.2s;
+      flex-shrink: 0;
+    }
+
+    .file-toggle::after {
+      content: '';
+      position: absolute;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #fff;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    }
+
+    .file-toggle.on {
+      background: var(--card-color);
+    }
+
+    .file-toggle.on::after {
+      transform: translateX(11px);
+    }
+
+    .file-name {
+      font-size: 11px;
+      font-family: 'Space Mono', monospace;
+      color: var(--text-muted);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ===== 住所検索 ===== */
+    #searchBox {
+      display: flex;
+      align-items: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      flex-shrink: 1;
+      transition: border-color 0.18s;
+    }
+
+    #searchBox:focus-within {
+      border-color: var(--accent);
+    }
+
+    #searchInput {
+      background: transparent;
+      border: none;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--text);
+      font-family: 'Noto Sans JP', sans-serif;
+      outline: none;
+      width: 190px;
+    }
+
+    #searchInput::placeholder {
+      color: var(--text-muted);
+    }
+
+    #searchClear {
+      background: none;
+      border: none;
+      padding: 4px 6px;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 11px;
+      line-height: 1;
+      flex-shrink: 0;
+      opacity: 0.5;
+      transition: opacity 0.15s;
+    }
+
+    #searchClear:hover {
+      opacity: 1;
+    }
+
+    #searchBtn {
+      background: none;
+      border: none;
+      border-left: 1px solid var(--border);
+      padding: 5px 9px;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1;
+      transition: background 0.15s, color 0.15s;
+      flex-shrink: 0;
+    }
+
+    #searchBtn:hover {
+      background: var(--accent);
+      color: #fff;
+    }
+  </style>
+</head>
+
+<!-- 強制キャッシュクリア -->
+<script>
+  const VERSION = '2026-07-26-boundary-autosync-v1';
+  if (localStorage.getItem('appVersion_town') !== VERSION) {
+    localStorage.setItem('appVersion_town', VERSION);
+    window.location.reload(true);
+  }
+</script>
+
+<body>
+
+  <div id="hover-tooltip">
+    <div class="ht-label"></div>
+    <div class="ht-time"></div>
+  </div>
+  <div id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text">地図を読み込み中...</div>
+  </div>
+  <div id="progress-bar">
+    <div id="progress-fill"></div>
+  </div>
+
+  <div id="colPickModal">
+    <div class="cp-card">
+      <div class="cp-header">
+        <div class="cp-title">配布数の列を選択してください</div>
+        <div class="cp-desc">CSVから「配布数」の列を自動判別できませんでした。該当する列をクリックして選択してください。</div>
+      </div>
+      <div class="cp-list" id="colPickList"></div>
+      <div class="cp-footer">
+        <button class="header-btn secondary" id="colPickCancelBtn">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+
+  <div id="saveLoadModal">
+    <div class="cp-card">
+      <div class="cp-header">
+        <div class="cp-title" id="slModalTitle">セーブデータ</div>
+        <div class="cp-desc" id="slModalDesc"></div>
+      </div>
+      <div class="cp-list" id="slModalList"></div>
+      <div class="sl-newrow" id="slNewRow" style="display:none">
+        <input class="sl-name-input" type="text" id="slNewName" placeholder="新しい名前を入力" maxlength="40">
+        <button class="header-btn" id="slNewSaveBtn" style="flex-shrink:0;width:auto;padding:6px 14px">保存</button>
+      </div>
+      <div class="cp-footer">
+        <button class="header-btn secondary" id="slCancelBtn">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="app">
+    <header id="header">
+      <div class="header-row" id="headerRow1">
+        <div class="logo">◈ GPS TRACKER</div>
+        <h1>ver.5.0</h1>
+        <div class="header-group" id="trackGroup">
+          <label class="header-btn" id="trackBtn" for="folderInput"
+            title="GPXを含むZIP、配布データCSV（日付・端末・GPS列）、ITM（トレッキングマップ）、JSON（ロガー）ファイルを読み込みます。複数選択・追加読込に対応">🗜 GPXデータを開く</label>
+          <input type="file" id="folderInput" accept=".zip,.csv,.gpx,.itm,.json" multiple style="display:none">
+          <button class="header-btn" id="trackClearBtn" style="padding:6px 9px" title="読み込んだ軌跡データをクリア"
+            onclick="clearTrackData()">✕</button>
+        </div>
+        <div class="header-group" id="csvReportGroup">
+          <label class="header-btn secondary" id="csvReportBtn" for="csvReportInput" title="複数選択・追加読込に対応">📊 住所コード読み込み</label>
+          <input type="file" id="csvReportInput" accept=".csv" multiple style="display:none">
+          <button class="header-btn secondary" id="csvReportClearBtn" style="padding:6px 9px" title="住所コード読み込みをキャンセル"
+            onclick="clearCSVReport()">✕</button>
+        </div>
+        <button class="header-btn secondary" id="aerialBtn" onclick="toggleAerial()">🛰 航空写真</button>
+        <div id="searchBox">
+          <input type="text" id="searchInput" placeholder="住所・郵便番号で検索" autocomplete="off">
+          <button id="searchClear" title="消去">✕</button>
+          <button id="searchBtn" title="検索">🔍</button>
+        </div>
+        <div id="locationDisplay">—</div>
+      </div>
+      <div class="header-row" id="headerRow2" title="クリックで下段の表示/非表示を切り替えます">
+        <div class="slider-row" id="secPerUnitRow" style="display:none;flex-shrink:0"
+          title="1軒あたりの配布に要すると想定する秒数です。大きくするほど推定配布数は少なめ（厳しめ）に、小さくするほど多め（甘め）になります">
+          <span class="slider-label">1軒あたり秒数</span>
+          <input type="range" id="secPerUnitSlider" min="10" max="60" step="5" value="30"
+            oninput="onSecPerUnitChange(this.value)" onchange="onSecPerUnitCommit(this.value)">
+          <span id="secPerUnitVal" class="slider-val">30秒</span>
+        </div>
+        <div class="slider-row" id="restDurationRow" style="display:none;flex-shrink:0"
+          title="この時間以上同じ場所に留まった区間は休憩・待機とみなし、配布率推定の対象から除外します（マンション等では長めに設定してください）">
+          <span class="slider-label">除外滞在時間</span>
+          <input type="range" id="restDurationSlider" min="0" max="120" step="5" value="30"
+            oninput="onRestDurationChange(this.value)" onchange="onRestDurationCommit(this.value)">
+          <span id="restDurationVal" class="slider-val">30分</span>
+        </div>
+        <div class="slider-row" id="transitSpeedRow" style="display:none;flex-shrink:0"
+          title="この速度以上で移動しながら通過したと判定されるクラスタは、立ち寄り（配布中）とみなさず推定配布数から除外します。小さくするほど推定配布数は少なめ（厳しめ）に、大きくするほど多め（甘め）になります">
+          <span class="slider-label">通過とみなす速度</span>
+          <input type="range" id="transitSpeedSlider" min="5" max="15" step="0.5" value="10"
+            oninput="onTransitSpeedChange(this.value)" onchange="onTransitSpeedCommit(this.value)">
+          <span id="transitSpeedVal" class="slider-val">10km/h</span>
+        </div>
+        <button class="header-btn secondary" id="rateHeatmapToggleBtn" style="display:none" onclick="toggleRateHeatmap()"
+          title="町丁目単位の充足率ヒートマップの表示/非表示を切り替えます">📊 充足率ヒートマップ</button>
+        <button class="header-btn secondary" id="saveBtn" onclick="openSaveModal()" title="現在の表示内容をブラウザに保存します" style="margin-left:auto">保存</button>
+        <button class="header-btn secondary" id="loadBtn" onclick="openLoadModal()" title="保存した内容を呼び出します">再開</button>
+        <a class="header-btn secondary" href="マニュアル.pdf" target="_blank" rel="noopener" style="text-decoration:none"
+          title="マニュアルPDFを別タブで開きます">📄 操作マニュアル</a>
+      </div>
+    </header>
+
+    <aside id="sidebar">
+      <div class="section-title">
+        端末一覧
+        <span class="count-badge" id="deviceCount"></span>
+        <span class="section-title-actions" id="deviceExpandActions" style="display:none">
+          <button class="section-icon-btn" onclick="expandAllGroups(true)" title="すべて展開">⊞</button>
+          <button class="section-icon-btn" onclick="expandAllGroups(false)" title="すべて閉じる">⊟</button>
+        </span>
+      </div>
+      <div id="deviceControls"></div>
+      <div id="deviceList"></div>
+
+      <div id="city-resizer"></div>
+      <div id="boundarySection">
+        <div class="section-title">
+          <span id="boundarySectionTitle">境界設定（都道府県）</span>
+          <span class="count-badge" id="cityCount"></span>
+        </div>
+        <div id="boundaryControls">
+          <div class="filter-area">
+            <div class="bulk-btns" id="boundaryStepper">
+              <button class="bulk-btn" id="boundaryStepPrefBtn" onclick="goBoundaryStage('pref')"
+                title="都道府県トグル表示に切り替えます">都道府県を表示する</button>
+              <button class="bulk-btn" id="boundaryStepCityBtn" onclick="goBoundaryStage('city')"
+                title="選択（トグルON）した都道府県の市区町村を表示します">市区町村を表示する</button>
+              <button class="bulk-btn" id="boundaryStepTownBtn" onclick="goBoundaryStage('town')"
+                title="選択（トグルON）した市区町村の町丁目を表示します">町丁目を表示する</button>
+            </div>
+            <div class="filter-input-wrap">
+              <input class="filter-input" type="text" id="cityFilterInput" placeholder="都道府県で絞り込み"
+                oninput="onCityFilter(this.value)">
+              <button type="button" class="filter-clear-btn" title="クリア" onclick="clearCityFilter()">×</button>
+            </div>
+            <div class="bulk-btns">
+              <button class="bulk-btn" onclick="bulkCityVisibility(true)">全て表示</button>
+              <button class="bulk-btn" onclick="bulkCityVisibility(false)">全て非表示</button>
+            </div>
+            <div class="slider-row">
+              <span class="slider-label">塗り濃度</span>
+              <input type="range" id="fillOpacitySlider" min="0" max="100" value="40"
+                oninput="onFillOpacity(this.value)">
+              <span id="fillOpacityVal" class="slider-val">40%</span>
+            </div>
+          </div>
+        </div>
+        <div id="cityListHeader" style="display:none"></div>
+        <div id="cityList"></div>
+      </div>
+
+    </aside>
+
+    <div id="sidebar-resizer"></div>
+    <div id="map"></div>
+  </div>
+
+  <script>
+    // ===== 定数 =====
+    const N_BUCKETS = 8;         // 速度段階数
+    const MAX_SPEED = 30;        // km/h 以上はすべて最薄
+
+    // ===== 状態 =====
+    let DEVICES = [];
+    let GROUPS = [];
+    let GPX_DATA = {};   // key → [[lat, lon, timeMs], ...]
+    let GPX_SPEEDS = {};   // key → Float32Array (各セグメントのkm/h)
+    let GPX_AVG_SPEED = {};   // key → 平均速度(km/h) or null。読み込み時に事前計算し、サイドバー展開時は表示のみ行う
+    let speedPolylines = {}; // key → L.polyline[N_BUCKETS]
+    let startMarkers = {};
+    let endMarkers = {};
+    let stayMarkers = {};
+    let visibility = {};
+    let filterText = '';
+    let updateTimer = null;
+    let modelColorMap = {}; // model文字列 → 色（追加読込でも既存端末の色を維持するため永続化）
+    let nextColorIdx = 0;   // 次に割り当てる色のインデックス
+    let nextDeviceSeq = 0;  // DEVICESキー生成用の連番（追加読込で重複しないよう常に増加）
+    let loadedKeys = new Set(); // 重複読込防止用「会社|端末|日付」キー（追加読込をまたいで永続化）
+    let groupExpanded = {};
+
+    // 境界ポリゴン状態（キーは市区町村コードで都道府県をまたいだ衝突を防ぐ）
+    let cityGroups = {};
+    let cityVisibility = {};
+    let citySetai = {};
+    let cityCodes = {};        // key → 市区町村コード（ソート用）
+    let cityNames = {};        // key → 市区町村名（表示用）
+    let cityPrefCodes = {};    // key → 都道府県コード（2桁）
+    let cityTownCodes = {};    // key → 町丁目KEY_CODE配列（このキーが存在する＝ジオメトリ取得済みの判定にも使う）
+    let cityLoadingKeys = new Set(); // ジオメトリ取得中の市区町村key（一覧のローディング表示・多重fetch防止用）
+    let cityFilterText = '';
+    let loadedPrefCodes = new Set(); // 読み込み済み都道府県コード（市区町村一覧＝indexのみ読み込み済みの場合を含む）
+    let autoPrefCodes = new Set();   // 住所コード読込により自動取得された都道府県コード（住所コード解除に連動して自動解除する）
+    let fullyFetchedPrefCodes = new Set(); // 県内全市区町村のジオメトリまで取得済みの都道府県コード（住所コードCSVの照合に必要な範囲の判定に使う）
+    let boundaryFeatureCount = 0;    // 読み込み済み全フィーチャ数
+
+    // 境界設定ペインの表示段階（都道府県→市区町村→町丁目の3段階を1つのペインで切り替える）
+    let boundaryLevel = 'pref';      // 'pref' | 'city' | 'town'
+    let prefSelected = new Set();    // 都道府県トグルで選択中（トグルON）の都道府県コード集合
+    let townStageFromCSV = false;    // 現在の町丁目表示が住所コードCSV由来か（由来なら都道府県/市区町村へ戻る際にキャンセル確認を出す）
+
+    // 政令指定都市の区名かどうかを判定し、親となる市名を返す（例:「横浜市中区」→「横浜市」）。該当しなければnull
+    function designatedCityParent(name) {
+      const m = /^(.+市)(.+区)$/.exec(name || '');
+      return m ? m[1] : null;
+    }
+
+    const PREF_NAMES = {
+      '01': '北海道', '02': '青森県', '03': '岩手県', '04': '宮城県', '05': '秋田県',
+      '06': '山形県', '07': '福島県', '08': '茨城県', '09': '栃木県', '10': '群馬県',
+      '11': '埼玉県', '12': '千葉県', '13': '東京都', '14': '神奈川県', '15': '新潟県',
+      '16': '富山県', '17': '石川県', '18': '福井県', '19': '山梨県', '20': '長野県',
+      '21': '岐阜県', '22': '静岡県', '23': '愛知県', '24': '三重県', '25': '滋賀県',
+      '26': '京都府', '27': '大阪府', '28': '兵庫県', '29': '奈良県', '30': '和歌山県',
+      '31': '鳥取県', '32': '島根県', '33': '岡山県', '34': '広島県', '35': '山口県',
+      '36': '徳島県', '37': '香川県', '38': '愛媛県', '39': '高知県', '40': '福岡県',
+      '41': '佐賀県', '42': '長崎県', '43': '熊本県', '44': '大分県', '45': '宮崎県',
+      '46': '鹿児島県', '47': '沖縄県',
+    };
+    // 都道府県名 → コードの逆引き（住所検索結果から都道府県コードを引くために使用）
+    const PREF_CODE_BY_NAME = Object.fromEntries(Object.entries(PREF_NAMES).map(([code, name]) => [name, code]));
+
+    // CSVレポート状態
+    let allFeaturesByCode = {};   // KEY_CODE文字列 → feature[]
+    let csvTowns = [];            // [{code, prefName, cityName, townName}]
+    let townLayers = {};          // code → L.GeoJSON
+    let townVisibility = {};      // code → bool
+    let townFilterText = '';
+    let csvMode = false;
+
+    // 町丁目ポイントカウント配布率推定状態（メッシュを介さず、GPS滞在クラスタを直接町丁目ポリゴンに判定する）
+    let rateHeatmapVisible   = false; // 推定配布率ヒートマップ（町丁目単位コロプレス）の表示/非表示
+    let rateAutoShown        = false; // 集計結果が得られた際の自動ON表示を既に行ったか（以降はユーザー操作を尊重する）
+    let clusterRadiusM       = 15;    // クラスタリング半径(m)
+    let secPerUnit           = 30;    // 1軒あたり想定所要秒数（UIスライダーで10-60秒の範囲で調整可能）
+    const DISTRIBUTION_ESTIMATE_FACTOR = 2 / 3; // 推定配布数が実績より多めに出る傾向があるため一律で縮小補正する係数
+    let cityKeyByTownCode    = {};    // 町丁目KEY_CODE → 市区町村key（境界データ読み込み時に構築）
+    let townSetaiByCode      = {};    // 町丁目KEY_CODE → 世帯数(SETAI合計、境界shapefileのプロパティから直接集計)
+    let townVisitUnits       = {};    // 町丁目KEY_CODE → 推定軸数（滞在時間/secPerUnitのクラスタをポイント・イン・ポリゴン判定して積算）
+    let townDeliveryStats    = {};    // code(住所コード欄ではtown.code、境界設定欄では町丁目KEY_CODE) → {households, visits, rate}
+    let cityDeliveryStats    = {};    // 市区町村key → {households, visits, rate}（境界設定モード用のロールアップ結果）
+
+    // 町丁目ポリゴンの空間インデックス（findTownCodeAtでのポイント・イン・ポリゴン判定を高速化する）
+    let townFeatureList  = [];   // [{code, geometry, bbox}] 全町丁目フィーチャをフラット化したもの
+    let townSpatialIdx   = null; // Map "latBucket,lonBucket" → townFeatureListのindex配列
+    const TOWN_BUCKET_FACTOR  = 4;     // バケット1辺 ≒ 町丁目bbox辺長中央値の何倍にするか
+    const TOWN_BUCKET_MIN_DEG = 0.002; // バケット最小辺長（度）
+    const TOWN_BUCKET_MAX_DEG = 0.25;  // バケット最大辺長（度）
+    const TOWN_SIZE_SAMPLE_N  = 4096;  // 辺長中央値推定のサンプル数
+    let townBucketLatDeg = TOWN_BUCKET_MAX_DEG;
+    let townBucketLonDeg = TOWN_BUCKET_MAX_DEG;
+
+    // 推定配布率ヒートマップの配色（データに依存しない固定グラデーションLUT、起動時に1回構築）
+    let rateColorLUT = null;
+
+    // ===== 速度ヘルパー =====
+    function speedToBucket(kmh) {
+      return Math.min(N_BUCKETS - 1, Math.floor(kmh / MAX_SPEED * N_BUCKETS));
+    }
+    function bucketToOpacity(b) {
+      return 0.9 - (b / (N_BUCKETS - 1)) * 0.78;
+    }
+
+    function haversineKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dφ = (lat2 - lat1) * Math.PI / 180;
+      const dλ = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dφ / 2) ** 2
+        + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dλ / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function calcSpeeds(coords) {
+      const n = coords.length;
+      const out = new Float32Array(Math.max(0, n - 1));
+      for (let i = 0; i < n - 1; i++) {
+        const [la1, lo1, t1] = coords[i];
+        const [la2, lo2, t2] = coords[i + 1];
+        const dtHr = (t2 - t1) / 3_600_000;
+        out[i] = (dtHr > 0 && dtHr < 2)
+          ? Math.min(haversineKm(la1, lo1, la2, lo2) / dtHr, 999)
+          : -1; // 長時間ギャップ or 無効タイムスタンプ → 描画しない
+      }
+      return out;
+    }
+
+    function computeStays(coords) {
+      const THRESH_KM = 0.03;
+      const MIN_MS = 30 * 60 * 1000;
+      const stays = [];
+      let i = 0;
+      while (i < coords.length) {
+        const [baseLat, baseLon] = coords[i];
+        let end = i;
+        while (end + 1 < coords.length &&
+          haversineKm(baseLat, baseLon, coords[end + 1][0], coords[end + 1][1]) < THRESH_KM) {
+          end++;
+        }
+        if (end > i && coords[end][2] - coords[i][2] >= MIN_MS) {
+          let sumLat = 0, sumLon = 0;
+          for (let k = i; k <= end; k++) { sumLat += coords[k][0]; sumLon += coords[k][1]; }
+          const cnt = end - i + 1;
+          stays.push({ lat: sumLat / cnt, lon: sumLon / cnt, startTime: coords[i][2], endTime: coords[end][2] });
+          i = end + 1;
+        } else {
+          i++;
+        }
+      }
+      return stays;
+    }
+
+    // サイドバー（端末番号トグル展開時）の軌跡ごとの平均速度表示用。
+    // 30km/h以上の移動区間と、30m以内に30分以上滞在した区間を除外して平均速度(km/h)を算出する
+    const AVG_SPEED_EXCLUDE_KMH = 30;
+    const AVG_SPEED_STAY_KM = 0.03;
+    const AVG_SPEED_STAY_MS = 30 * 60 * 1000;
+    function computeTrajectoryAvgSpeed(coords) {
+      if (!coords || coords.length < 2) return null;
+      const n = coords.length;
+      const inStay = new Uint8Array(n);
+      let i = 0;
+      while (i < n) {
+        const [baseLat, baseLon] = coords[i];
+        let end = i;
+        while (end + 1 < n &&
+          haversineKm(baseLat, baseLon, coords[end + 1][0], coords[end + 1][1]) < AVG_SPEED_STAY_KM) {
+          end++;
+        }
+        if (end > i && coords[end][2] - coords[i][2] >= AVG_SPEED_STAY_MS) {
+          for (let k = i; k <= end; k++) inStay[k] = 1;
+          i = end + 1;
+        } else {
+          i++;
+        }
+      }
+      let totalKm = 0, totalHr = 0;
+      for (let k = 0; k < n - 1; k++) {
+        if (inStay[k] || inStay[k + 1]) continue;
+        const [la1, lo1, t1] = coords[k];
+        const [la2, lo2, t2] = coords[k + 1];
+        const dtHr = (t2 - t1) / 3_600_000;
+        if (!(dtHr > 0 && dtHr < 2)) continue;
+        const km = haversineKm(la1, lo1, la2, lo2);
+        const kmh = km / dtHr;
+        if (kmh >= AVG_SPEED_EXCLUDE_KMH) continue;
+        totalKm += km;
+        totalHr += dtHr;
+      }
+      return totalHr > 0 ? totalKm / totalHr : null;
+    }
+
+    // 除外条件: 休憩等とみなす滞在（30m以内に一定時間以上滞在）、高速移動（20km/h以上）、および低速の通過移動
+    const REST_EXCLUDE_KM  = 0.03;          // 休憩とみなす滞在半径(30m)
+    let restExcludeMinutes = 30;            // 休憩とみなす滞在時間(分)。ヘッダーのスライダーで調整可能（マンション等では長めに設定）
+    const SPEED_EXCLUDE_KMH = 20;           // これ以上の移動速度は配布中でないとみなす
+    let transitSpeedKmh = 10;                // これ以上の実効速度で通過したクラスタは立ち寄り（配布中）とみなさない。ヘッダーのスライダーで調整可能
+
+    // ヘッダーの「1軒あたり秒数」スライダー操作中（ドラッグ中）に呼ばれる: 表示ラベルのみ更新
+    function onSecPerUnitChange(sec) {
+      secPerUnit = Number(sec);
+      document.getElementById('secPerUnitVal').textContent = secPerUnit + '秒';
+    }
+
+    // スライダーの値が確定した時点で呼ばれる: 軽量なポイント・イン・ポリゴン集計を再計算する
+    function onSecPerUnitCommit(sec) {
+      onSecPerUnitChange(sec);
+      computeVisitEstimates();
+    }
+
+    // ヘッダーの「除外滞在時間」スライダー操作中（ドラッグ中）に呼ばれる: 表示ラベルのみ更新
+    function onRestDurationChange(minutes) {
+      restExcludeMinutes = Number(minutes);
+      document.getElementById('restDurationVal').textContent = restExcludeMinutes + '分';
+    }
+
+    // スライダーの値が確定した時点（マウスを離した/キーで確定した時点）で呼ばれる: 配布率を再計算する
+    function onRestDurationCommit(minutes) {
+      onRestDurationChange(minutes);
+      computeVisitEstimates();
+    }
+
+    // ヘッダーの「通過とみなす速度」スライダー操作中（ドラッグ中）に呼ばれる: 表示ラベルのみ更新
+    function onTransitSpeedChange(kmh) {
+      transitSpeedKmh = Number(kmh);
+      document.getElementById('transitSpeedVal').textContent = transitSpeedKmh + 'km/h';
+    }
+
+    // スライダーの値が確定した時点で呼ばれる: 配布率を再計算する
+    function onTransitSpeedCommit(kmh) {
+      onTransitSpeedChange(kmh);
+      computeVisitEstimates();
+    }
+
+    // coords中の各点について、休憩中または高速移動中と判定される点をtrueにしたフラグ配列を返す
+    function computeExclusionFlags(coords) {
+      const n = coords.length;
+      const excluded = new Uint8Array(n);
+
+      // 高速移動区間の除外（区間の前後どちらの点も除外対象にする）
+      for (let i = 0; i < n - 1; i++) {
+        const [la1, lo1, t1] = coords[i];
+        const [la2, lo2, t2] = coords[i + 1];
+        const dtHr = (t2 - t1) / 3_600_000;
+        if (dtHr > 0 && dtHr < 2) {
+          const kmh = haversineKm(la1, lo1, la2, lo2) / dtHr;
+          if (kmh >= SPEED_EXCLUDE_KMH) { excluded[i] = 1; excluded[i + 1] = 1; }
+        }
+      }
+
+      // 休憩とみなす滞在（30m以内に一定時間以上）の除外。0分の場合は休憩除外自体を行わない
+      const restExcludeMs = restExcludeMinutes * 60 * 1000;
+      if (restExcludeMs > 0) {
+        let i = 0;
+        while (i < n) {
+          const [baseLat, baseLon] = coords[i];
+          let end = i;
+          while (end + 1 < n &&
+            haversineKm(baseLat, baseLon, coords[end + 1][0], coords[end + 1][1]) < REST_EXCLUDE_KM) {
+            end++;
+          }
+          if (end > i && coords[end][2] - coords[i][2] >= restExcludeMs) {
+            for (let k = i; k <= end; k++) excluded[k] = 1;
+          }
+          i = end + 1;
+        }
+      }
+      return excluded;
+    }
+
+    // クラスタ(i..end)が「立ち止まらず通過しただけ」かどうかを実効速度から判定する
+    // （田舎など家と家の間が離れている場合、20km/h未満の徒歩・低速移動が長く続き、
+    // 　立ち寄りクラスタが移動区間で細切れに検出されて推定配布数が水増しされるのを防ぐ）
+    function isTransitSegment(coords, i, end) {
+      if (end > i) {
+        // 複数点のクラスタ: 始点・終点間の実効速度（滞在中の移動が小さければ低速、通過なら速い）で判定
+        const dwellHr = (coords[end][2] - coords[i][2]) / 3_600_000;
+        if (dwellHr <= 0) return false;
+        const speedKmh = haversineKm(coords[i][0], coords[i][1], coords[end][0], coords[end][1]) / dwellHr;
+        return speedKmh >= transitSpeedKmh;
+      }
+      // 単独点のクラスタ: 前後どちらの区間速度も通過速度以上なら、立ち止まらず通過したとみなす
+      const speeds = [];
+      if (i > 0) {
+        const dtHr = (coords[i][2] - coords[i - 1][2]) / 3_600_000;
+        if (dtHr > 0 && dtHr < 2) speeds.push(haversineKm(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1]) / dtHr);
+      }
+      if (end + 1 < coords.length) {
+        const dtHr = (coords[end + 1][2] - coords[end][2]) / 3_600_000;
+        if (dtHr > 0 && dtHr < 2) speeds.push(haversineKm(coords[end][0], coords[end][1], coords[end + 1][0], coords[end + 1][1]) / dtHr);
+      }
+      return speeds.length > 0 && speeds.every(s => s >= transitSpeedKmh);
+    }
+
+    // 配布の立ち寄り検出用（computeStaysより緩い半径・時間閾値なし）
+    // 休憩中・高速移動中と判定された点はクラスタの起点にも構成要素にもしない
+    function computeVisitClusters(coords, radiusKm) {
+      const excluded = computeExclusionFlags(coords);
+      const clusters = [];
+      let i = 0;
+      while (i < coords.length) {
+        if (excluded[i]) { i++; continue; }
+        const [baseLat, baseLon] = coords[i];
+        let end = i;
+        while (end + 1 < coords.length && !excluded[end + 1] &&
+          haversineKm(baseLat, baseLon, coords[end + 1][0], coords[end + 1][1]) < radiusKm) {
+          end++;
+        }
+        if (isTransitSegment(coords, i, end)) { i = end + 1; continue; }
+        let sumLat = 0, sumLon = 0;
+        for (let k = i; k <= end; k++) { sumLat += coords[k][0]; sumLon += coords[k][1]; }
+        const cnt = end - i + 1;
+        clusters.push({
+          lat: sumLat / cnt, lon: sumLon / cnt,
+          pointCount: cnt,
+          dwellMs: coords[end][2] - coords[i][2],
+        });
+        i = end + 1;
+      }
+      return clusters;
+    }
+
+    // ===== ズーム適応サンプリング =====
+    function getSampleRate(zoom) {
+      if (zoom >= 18) return 1;
+      if (zoom >= 17) return 2;
+      if (zoom >= 16) return 4;
+      if (zoom >= 15) return 8;
+      if (zoom >= 14) return 16;
+      if (zoom >= 13) return 32;
+      return 64;
+    }
+
+    // 表示範囲内セグメントをバケット別に振り分ける
+    function buildBucketSegments(coords, speeds, zoom, bounds) {
+      const rate = getSampleRate(zoom);
+      const n = coords.length;
+      const buckets = Array.from({ length: N_BUCKETS }, () => []);
+      if (n < 2) return buckets;
+
+      const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
+      const dlat = (ne.lat - sw.lat) * 0.2;
+      const dlon = (ne.lng - sw.lng) * 0.2;
+      const minLat = sw.lat - dlat, maxLat = ne.lat + dlat;
+      const minLon = sw.lng - dlon, maxLon = ne.lng + dlon;
+      function inBounds(lat, lon) {
+        return lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon;
+      }
+
+      for (let i = 0; i < n - 1; i += rate) {
+        const j = Math.min(i + rate, n - 1);
+        const [la0, lo0] = coords[i];
+        const [la1, lo1] = coords[j];
+        if (!inBounds(la0, lo0) && !inBounds(la1, lo1)) continue;
+
+        // このチャンクの平均速度（ギャップを含む場合はスキップ）
+        let sum = 0;
+        let hasGap = false;
+        for (let k = i; k < j; k++) {
+          if (speeds[k] < 0) { hasGap = true; break; }
+          sum += speeds[k];
+        }
+        if (hasGap) continue;
+
+        buckets[speedToBucket(Math.min(sum / (j - i), MAX_SPEED))].push([[la0, lo0], [la1, lo1]]);
+      }
+      return buckets;
+    }
+
+    function updatePolylines() {
+      if (!DEVICES.length) return;
+      const zoom = map.getZoom(), bounds = map.getBounds();
+      DEVICES.forEach(dev => {
+        const polys = speedPolylines[dev.key];
+        if (!polys || !polys.some(p => map.hasLayer(p))) return;
+        const coords = GPX_DATA[dev.key];
+        const speeds = GPX_SPEEDS[dev.key];
+        if (!coords || !coords.length || !speeds) return;
+        const buckets = buildBucketSegments(coords, speeds, zoom, bounds);
+        for (let b = 0; b < N_BUCKETS; b++) polys[b].setLatLngs(buckets[b]);
+      });
+    }
+
+    function schedulePolylineUpdate() {
+      if (updateTimer) clearTimeout(updateTimer);
+      updateTimer = setTimeout(updatePolylines, 120);
+    }
+
+    // ===== 色生成 (黄金角 100色) =====
+    function deviceColor(idx) {
+      const hue = (idx * 137.508) % 360;
+      return `hsl(${Math.round(hue)}, 78%, 44%)`;
+    }
+
+    // ZIPエントリ名末尾のNUL文字を除去（.itm内部ZIPなど一部ツールが生成するZIPでファイル名がNUL終端のまま
+    // 格納されているケースがあり、そのままだと拡張子判定（endsWith）が一致しない）
+    function stripNulSuffix(name) {
+      return name.replace(/\0+$/, '');
+    }
+
+    // ===== 座標配列の共通後処理 =====
+    // 同じ時刻の記録が連続する場合は1件目のみ採用する（一部端末機種の重複記録対策）。GPX/ITM/JSON共通で使用
+    function dedupeConsecutiveSameTime(pts) {
+      const result = [];
+      let lastT = null;
+      for (const p of pts) {
+        if (result.length && p[2] === lastT) continue;
+        result.push(p);
+        lastT = p[2];
+      }
+      return result;
+    }
+
+    // ===== GPXパーサ (タイムスタンプ込み) =====
+    // <trk><name>氏名 root_no: 端末番号</name></trk> 形式（plusGPS等）にも対応し、trackNameとして返す
+    function parseGPX(xmlText) {
+      const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+      const pts = Array.from(doc.querySelectorAll('trkpt')).map(pt => {
+        const lat = parseFloat(pt.getAttribute('lat'));
+        const lon = parseFloat(pt.getAttribute('lon'));
+        const timeEl = pt.querySelector('time');
+        const t = timeEl ? new Date(timeEl.textContent.trim()).getTime() : 0;
+        return [lat, lon, t];
+      }).filter(([lat, lon]) => !isNaN(lat) && !isNaN(lon));
+      const nameEl = doc.querySelector('trk > name');
+      const trackName = nameEl ? nameEl.textContent.trim() : '';
+      return { coords: dedupeConsecutiveSameTime(pts), trackName };
+    }
+
+    // ===== ITM (トレッキングマップ ituser.poi SQLite) パーサ =====
+    // .itm は ZIP 内に ituser.poi (SQLite DB) を含む。Line(トラック)ごとにWP(座標)+GPSLog(時刻)を辿り、
+    // 全Lineの点をfID順に連結して1本の軌跡として扱う（GPXの複数<trk>を1台分として扱う既存挙動と揃える）
+    let sqlJsPromise = null;
+    function getSqlJs() {
+      if (!sqlJsPromise) {
+        sqlJsPromise = initSqlJs({
+          locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`
+        });
+      }
+      return sqlJsPromise;
+    }
+    const ITM_EPOCH_MS = Date.UTC(1601, 0, 1);
+    // fGPSTime1/2 (.NETのDateTime.Ticks上位/下位32bit、100ns単位) → ミリ秒
+    function itmTicksToMs(t1, t2) {
+      const ticks = (BigInt(t1) << 32n) | BigInt(t2 >>> 0);
+      return ITM_EPOCH_MS + Number(ticks / 10000n);
+    }
+    async function parseITM(arrayBuffer) {
+      const [SQL, zip] = await Promise.all([getSqlJs(), JSZip.loadAsync(arrayBuffer)]);
+      const poiEntry = Object.values(zip.files).find(f => !f.dir && stripNulSuffix(f.name).toLowerCase().endsWith('.poi'));
+      if (!poiEntry) throw new Error('.poi データが見つかりません（.itm ではない可能性）');
+      const poiBytes = await poiEntry.async('uint8array');
+      const db = new SQL.Database(poiBytes);
+      try {
+        const lines = db.exec('SELECT fID, fName, f1stWPID, fLstWPID FROM Line ORDER BY fID');
+        const pts = [];
+        let trackName = '';
+        if (lines.length) {
+          const { values } = lines[0];
+          const stmt = db.prepare(
+            'SELECT w.fLongitude AS lon, w.fLatitude AS lat, g.fGPSTime1 AS t1, g.fGPSTime2 AS t2 ' +
+            'FROM WP w LEFT JOIN GPSLog g ON g.fID = w.fGPSLogID WHERE w.fID BETWEEN $a AND $b ORDER BY w.fID'
+          );
+          values.forEach(([, lname, w1, w2], i) => {
+            if (i === 0) trackName = String(lname || '');
+            stmt.bind({ $a: w1, $b: w2 });
+            while (stmt.step()) {
+              const r = stmt.getAsObject();
+              if (r.lat == null || r.lon == null || isNaN(r.lat) || isNaN(r.lon)) continue;
+              const t = r.t1 != null ? itmTicksToMs(r.t1, r.t2) : 0;
+              pts.push([r.lat, r.lon, t]);
+            }
+            stmt.reset();
+          });
+          stmt.free();
+        }
+        return { coords: dedupeConsecutiveSameTime(pts), trackName };
+      } finally {
+        db.close();
+      }
+    }
+
+    // ===== JSON (ロガー出力) パーサ =====
+    // 形式: [[{latitude, longitude, speed, timestamp}, ...]] （外側1件の配列に点配列を格納）。
+    // 入れ子構造の違いに対応するため、配列は再帰的に平坦化してから点オブジェクトを拾う
+    function parseTrackJSON(jsonText) {
+      const data = JSON.parse(jsonText);
+      const pts = [];
+      (function flatten(node) {
+        if (Array.isArray(node)) { node.forEach(flatten); return; }
+        if (node && typeof node === 'object') pts.push(node);
+      })(data);
+      const coords = pts.map(p => {
+        const lat = parseFloat(p.latitude ?? p.lat);
+        const lon = parseFloat(p.longitude ?? p.lon ?? p.lng);
+        const ts = p.timestamp ?? p.time;
+        let t = 0;
+        if (typeof ts === 'number') t = ts > 1e12 ? ts : ts * 1000; // ミリ秒 or 秒(UNIX time)を自動判定
+        else if (typeof ts === 'string') t = new Date(ts).getTime();
+        return [lat, lon, t];
+      }).filter(([lat, lon]) => !isNaN(lat) && !isNaN(lon));
+      return { coords: dedupeConsecutiveSameTime(coords) };
+    }
+
+    // ===== ファイル名解析 =====
+    // 例: 20260501006_福岡ポスティング_YDM20070489_10.gpx → company=福岡ポスティング, model=YDM20070489, num=10
+    function parseFilename(filename) {
+      const base = filename.replace(/\.(gpx|itm|json)$/i, '');
+      const parts = base.split('_');
+      const num = parseInt(parts[parts.length - 1], 10);
+      const model = parts.length >= 2 ? parts[parts.length - 2] : '';
+      const company = parts.length >= 3 ? parts[1] : '';
+      return { num: isNaN(num) ? 9999 : num, model, company, base };
+    }
+
+    // ===== グループ構築 (端末番号=モデル単位) =====
+    // ロガーID（モデル名・会社名）を持たないデータ（itm/jsonのログファイルなど）は同じ空文字キーで
+    // まとめられてしまい区別が付かなくなるため、1台ずつ個別グループとして扱い、
+    // グループ名にファイル名（rawLabel）を表示してトグルを分ける
+    function buildGroups() {
+      const modelMap = new Map();
+      DEVICES.forEach(dev => {
+        // Symbolを使い、他のどの文字列キー（実在のモデル名）とも衝突しないことを保証する
+        const key = (dev.model || dev.company) ? dev.model : Symbol(dev.key);
+        if (!modelMap.has(key)) modelMap.set(key, []);
+        modelMap.get(key).push(dev);
+      });
+      GROUPS = [...modelMap.entries()]
+        .map(([, devices]) => {
+          const noId = !devices[0].model && !devices[0].company;
+          const model = noId ? (devices[0].rawLabel || devices[0].model) : devices[0].model;
+          return { model, company: devices[0]?.company || '', devices };
+        })
+        .sort((a, b) => a.model.localeCompare(b.model));
+    }
+
+    // ===== メモリ不足判定 =====
+    function isOutOfMemoryError(e) {
+      if (!e) return false;
+      if (e instanceof RangeError) return true;
+      const msg = String(e.message || e).toLowerCase();
+      return msg.includes('out of memory') || msg.includes('allocation failed') || msg.includes('quota');
+    }
+
+    // トラックソース1件（ファイル名+座標+トラック名）→ {num, model, company, coords, noData}
+    // 座標が1件も取れない場合（trksegが空など）もエラーにせず、noData:trueの端末として返す。GPX/ITM/JSON共通処理
+    function finalizeTrackItem(name, coords, trackName) {
+      let { num, model, company } = parseFilename(name);
+      let rawLabel;
+      // <name>氏名 root_no: 端末番号</name> 形式の場合は氏名・端末番号をトグル表示に使用
+      const rootNoMatch = /^(.*?)\s*root_no\s*[:：]\s*(\S+)$/i.exec(trackName || '');
+      if (rootNoMatch) {
+        const personName = rootNoMatch[1].trim();
+        const rootNo = rootNoMatch[2].trim();
+        company = personName;
+        model = rootNo;
+        rawLabel = `${personName} ${rootNo}`;
+        const n = parseInt(rootNo, 10);
+        if (!isNaN(n)) num = n;
+      }
+      // ファイル名が「会社_モデル_番号」規約に沿わずcompany/modelが両方空の場合、表示が空欄にならないよう
+      // ファイル名（拡張子除く）をラベルとして使う（itm/jsonのログファイル名など）
+      if (!rawLabel && !company && !model) {
+        rawLabel = name.replace(/\.[^./]+$/, '');
+      }
+      // 重複読込判定用の日付キー(YYYYMMDD)：座標があれば最初の点の日付、無ければファイル名先頭の日付らしき8桁から推測
+      let dateKey = '';
+      if (coords.length) {
+        const d = new Date(coords[0][2]);
+        dateKey = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      } else {
+        const m = /^(\d{8})/.exec(name);
+        if (m) dateKey = m[1];
+      }
+      return { num, model, company, coords, noData: !coords.length, dateKey, rawLabel, sourceName: name };
+    }
+
+    async function parseGPXSource(name, text) {
+      const { coords, trackName } = parseGPX(text);
+      return finalizeTrackItem(name, coords, trackName);
+    }
+
+    async function parseITMSource(name, arrayBuffer) {
+      const { coords, trackName } = await parseITM(arrayBuffer);
+      return finalizeTrackItem(name, coords, trackName);
+    }
+
+    async function parseJSONSource(name, text) {
+      const { coords } = parseTrackJSON(text);
+      return finalizeTrackItem(name, coords, '');
+    }
+
+    // ===== レイヤー管理 =====
+    const canvasRenderer = L.canvas({ padding: 0.5 });
+    // GPX軌跡のポリラインはネイティブのホバー判定を使わず、独自のdoHoverSearchで扱っている。
+    // このrendererのcanvas要素はデフォルトでpointer-eventsを受け取ってしまい、一度でも軌跡を
+    // 表示するとそのcanvas（overlayPane、z-index 400）がboundaryPane（z-index 350）より前面に
+    // 居座り続け、軌跡を全部非表示にしても境界ポリゴンのホバーがそれ以降ずっと反応しなくなる
+    // 問題があったため、pointer-eventsを無効化して下層（境界ポリゴン等）に通す
+    canvasRenderer.on('add', () => { canvasRenderer._container.style.pointerEvents = 'none'; });
+
+    function clearMapLayers() {
+      Object.values(speedPolylines).forEach(polys => polys.forEach(p => { if (map.hasLayer(p)) map.removeLayer(p); }));
+      Object.values(startMarkers).forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
+      Object.values(endMarkers).forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
+      Object.values(stayMarkers).forEach(ms => ms.forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); }));
+      speedPolylines = {}; startMarkers = {}; endMarkers = {}; stayMarkers = {};
+    }
+
+    function mkIcon(color, symbol, size = 20) {
+      const fs = size < 18 ? 10 : 12;
+      return L.divIcon({
+        html: `<div style="width:${size}px;height:${size}px;background:#fff;border:2px solid ${color};border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.28);display:flex;align-items:center;justify-content:center;font-size:${fs}px;color:${color};font-weight:bold;line-height:1">${symbol}</div>`,
+        className: '',
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+      });
+    }
+
+    // メインスレッドを長時間ブロックしないよう、重い同期処理の合間にブラウザへ制御を戻すためのヘルパー
+    // （大量データの復元時に「ページが応答しません」警告が出るのを防ぐ）
+    function yieldToUI() {
+      return new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    async function initMapLayers() {
+      let processed = 0;
+      for (const dev of DEVICES) {
+        if (speedPolylines[dev.key]) continue; // 既に構築済み（追加読込時の重複構築防止）
+        const coords = GPX_DATA[dev.key];
+        if (!coords || !coords.length) continue;
+
+        const polys = [];
+        for (let b = 0; b < N_BUCKETS; b++) {
+          const opacity = bucketToOpacity(b);
+          const poly = L.polyline([], {
+            color: dev.color, weight: 3, opacity,
+            smoothFactor: 1.2, renderer: canvasRenderer,
+          });
+          polys.push(poly);
+        }
+        speedPolylines[dev.key] = polys;
+
+        const first = coords[0], last = coords[coords.length - 1];
+        const companyLabel = dev.rawLabel || (dev.company ? `${dev.company} ${dev.model}` : dev.model);
+
+        const sm = L.marker([first[0], first[1]], { icon: mkIcon(dev.color, '▶'), zIndexOffset: 100 });
+        sm.on('mouseover', () => {
+          _balloonLocked = true;
+          const { x, y } = markerScreenPos(sm);
+          showBalloon(dev.color, companyLabel, `開始 ${fmtTime(first[2])}`, x, y, 'top');
+        });
+        sm.on('mouseout', hideBalloon);
+        startMarkers[dev.key] = sm;
+
+        const em = L.marker([last[0], last[1]], { icon: mkIcon(dev.color, '■'), zIndexOffset: 100 });
+        em.on('mouseover', () => {
+          _balloonLocked = true;
+          const { x, y } = markerScreenPos(em);
+          showBalloon(dev.color, companyLabel, `終了 ${fmtTime(last[2])}`, x, y, 'top');
+        });
+        em.on('mouseout', hideBalloon);
+        endMarkers[dev.key] = em;
+
+        stayMarkers[dev.key] = computeStays(coords).map(s => {
+          const m = L.marker([s.lat, s.lon], { icon: mkIcon(dev.color, '◎', 16), zIndexOffset: 90 });
+          m.on('mouseover', () => {
+            _balloonLocked = true;
+            const { x, y } = markerScreenPos(m);
+            const detail = `滞在 ${fmtTime(s.startTime)}<br>　〜 ${fmtTime(s.endTime)}（${fmtDuration(s.endTime - s.startTime)}）`;
+            showBalloon(dev.color, companyLabel, detail, x, y, 'top');
+          });
+          m.on('mouseout', hideBalloon);
+          return m;
+        });
+
+        processed++;
+        if (processed % 5 === 0) await yieldToUI();
+      }
+      const allPts = Object.values(GPX_DATA).flatMap(c => c.map(([la, lo]) => [la, lo]));
+      if (allPts.length) map.fitBounds(L.latLngBounds(allPts), { padding: [40, 40] });
+    }
+
+    // ===== 地図初期化 =====
+    const map = L.map('map', { zoomControl: true, attributionControl: true });
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    });
+    const gsiAerialLayer = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
+      attribution: '© <a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>',
+      maxZoom: 18,
+    });
+    osmLayer.addTo(map);
+    let aerialMode = false;
+    function toggleAerial() {
+      aerialMode = !aerialMode;
+      if (aerialMode) {
+        map.removeLayer(osmLayer);
+        gsiAerialLayer.addTo(map);
+      } else {
+        map.removeLayer(gsiAerialLayer);
+        osmLayer.addTo(map);
+      }
+      document.getElementById('aerialBtn').classList.toggle('active', aerialMode);
+    }
+    map.setView([35.6812, 139.7671], 12);
+    // 境界レイヤー用ペーン（GPS軌跡より下に描画）
+    map.createPane('boundaryPane');
+    map.getPane('boundaryPane').style.zIndex = 350;
+    // 境界ポリゴンはフィーチャ数が多くSVGだとDOM負荷が大きいためCanvas描画にする
+    const boundaryCanvasRenderer = L.canvas({ pane: 'boundaryPane', padding: 0.5 });
+    map.on('zoomend', updatePolylines);
+    map.on('moveend', schedulePolylineUpdate);
+    map.doubleClickZoom.disable();
+    map.on('dblclick', e => {
+      const zoom = map.getZoom();
+      const size = map.getSize();
+      const dx = e.containerPoint.x - size.x / 2;
+      const dy = e.containerPoint.y - size.y / 2;
+      const sidebarW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 400;
+      const gmOffset = 50 + (sidebarW - 180) / (700 - 180) * (300 - 20);
+      const worldPx = map.project(e.latlng, zoom).subtract([dx + gmOffset, dy]);
+      const c = map.unproject(worldPx, zoom);
+      window.open(`https://www.google.com/maps/@${c.lat.toFixed(6)},${c.lng.toFixed(6)},${zoom}z`, '_blank');
+    });
+
+    // ===== 表示更新 =====
+    function render() {
+      DEVICES.forEach(dev => {
+        const polys = speedPolylines[dev.key];
+        const sm = startMarkers[dev.key], em = endMarkers[dev.key];
+        const sms = stayMarkers[dev.key] || [];
+        if (!polys) return;
+        const show = visibility[dev.key];
+        if (show) {
+          polys.forEach(p => { if (!map.hasLayer(p)) p.addTo(map); });
+          if (sm && !map.hasLayer(sm)) sm.addTo(map);
+          if (em && !map.hasLayer(em)) em.addTo(map);
+          sms.forEach(m => { if (!map.hasLayer(m)) m.addTo(map); });
+        } else {
+          polys.forEach(p => { if (map.hasLayer(p)) map.removeLayer(p); });
+          if (sm && map.hasLayer(sm)) map.removeLayer(sm);
+          if (em && map.hasLayer(em)) map.removeLayer(em);
+          sms.forEach(m => { if (map.hasLayer(m)) map.removeLayer(m); });
+        }
+      });
+      updatePolylines();
+      updateSidebar();
+      // GPXマーカーをホバー中に、そのマーカーが非表示化で地図から消えることがある。
+      // マウスは動いていないためmouseoutが発火せず_balloonLockedがtrueのまま固まってしまい、
+      // それ以降ずっとホバーが反応しなくなるため、軌跡が1本も無くなった時点で強制的に解除する
+      if (!anyTrackVisible()) hideBalloon();
+    }
+
+    // ===== サイドバー更新 =====
+    function isGroupExpandable(group) {
+      const multi = group.devices.length > 1;
+      const soleNoData = !multi && group.devices[0]?.noData;
+      return multi || !soleNoData;
+    }
+    // 展開中の軌跡リストでトグルを操作したとき、その時点でONになっている軌跡（複数可）が
+    // 全部収まるようにズームする。ONが0件（全部OFFにした）場合は現在の表示のまま動かさない
+    function focusVisibleTracksInGroup(group) {
+      const onDevs = group.devices.filter(d => visibility[d.key]);
+      if (!onDevs.length) return;
+      const coords = onDevs.flatMap(d => GPX_DATA[d.key] || []).map(([la, lo]) => [la, lo]);
+      if (!coords.length) return;
+      const bounds = L.latLngBounds(coords);
+      if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
+    }
+    function makeGroupCard(group, gi) {
+      const allOn = group.devices.every(d => visibility[d.key]);
+      const someOn = group.devices.some(d => visibility[d.key]);
+      const toggleClass = allOn ? 'on' : someOn ? 'partial' : '';
+      const color = group.devices[0]?.color || '#888';
+      const multi = group.devices.length > 1;
+      const soleNoData = !multi && group.devices[0]?.noData;
+      const expandable = isGroupExpandable(group);
+      const expanded = expandable && !!groupExpanded[gi];
+      const arrow = expandable ? `<span style="font-size:9px;opacity:0.55;margin-left:3px">${expanded ? '▴' : '▾'}</span>` : '';
+      const card = document.createElement('div');
+      card.className = 'device-card' + (someOn ? ' active' : '');
+      card.style.setProperty('--card-color', color);
+      card.innerHTML = `
+      <div class="device-header">
+        <div class="device-dot"></div>
+        <div class="device-name${expandable ? ' device-name-expandable' : ''}"${expandable ? ` onclick="toggleGroupExpand(${gi})"` : ''}>${group.company ? `<span style="opacity:0.65;margin-right:4px">${group.company}</span>` : ''}${group.model}${arrow}</div>
+        ${soleNoData ? '<span class="nodata-badge">データなし</span>' : ''}
+        <div class="device-toggle ${toggleClass}" onclick="handleGroupToggle(${gi})"></div>
+      </div>`;
+      if (expanded) {
+        const fileList = document.createElement('div');
+        fileList.className = 'device-file-list';
+        group.devices.forEach(dev => {
+          const on = visibility[dev.key];
+          const fileRow = document.createElement('div');
+          fileRow.className = 'file-row';
+          const ftog = document.createElement('div');
+          ftog.className = 'file-toggle' + (on ? ' on' : '');
+          ftog.addEventListener('click', e => { e.stopPropagation(); visibility[dev.key] = !visibility[dev.key]; render(); focusVisibleTracksInGroup(group); });
+          const fname = document.createElement('span');
+          fname.className = 'file-name';
+          const _c0 = GPX_DATA[dev.key];
+          const _ms = _c0 && _c0.length ? _c0[0][2] : null;
+          if (_ms) {
+            const _d = new Date(_ms), _z = n => String(n).padStart(2, '0');
+            let _label = `${_z(_d.getMonth() + 1)}/${_z(_d.getDate())} ${_z(_d.getHours())}:${_z(_d.getMinutes())}`;
+            const _avgSpeed = GPX_AVG_SPEED[dev.key];
+            if (_avgSpeed != null) _label += `　平均${_avgSpeed.toFixed(1)}km/h`;
+            fname.textContent = _label;
+            fname.title = _label;
+          } else if (dev.noData) {
+            fname.textContent = 'データなし';
+            fname.style.opacity = '0.55';
+            fname.style.fontStyle = 'italic';
+          } else {
+            fname.textContent = `端末${dev.num}`;
+          }
+          fileRow.appendChild(ftog);
+          fileRow.appendChild(fname);
+          fileRow.addEventListener('click', () => { visibility[dev.key] = !visibility[dev.key]; render(); focusVisibleTracksInGroup(group); });
+          fileList.appendChild(fileRow);
+        });
+        card.appendChild(fileList);
+      }
+      return card;
+    }
+
+    function updateSidebar() {
+      const controls = document.getElementById('deviceControls');
+      const list = document.getElementById('deviceList');
+      const badge = document.getElementById('deviceCount');
+      controls.innerHTML = ''; list.innerHTML = '';
+
+      document.getElementById('deviceExpandActions').style.display = DEVICES.length ? '' : 'none';
+
+      if (!DEVICES.length) {
+        badge.textContent = '';
+        list.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">📂</div>
+          <div class="empty-text">「GPXデータを開く」を押して<br>軌跡データを読み込んでください<br>（軌跡データは追加読み込みも可能です）</div>
+        </div>`;
+        return;
+      }
+
+      badge.textContent = `${GROUPS.length}台 / ${DEVICES.length}件`;
+
+      controls.innerHTML = `
+      <div class="filter-area">
+        <input class="filter-input" type="text" placeholder="端末番号で絞り込み"
+               value="${filterText.replace(/"/g, '&quot;')}" oninput="onFilter(this.value)">
+        <div class="bulk-btns">
+          <button class="bulk-btn" onclick="bulkVisibility(true)">全て表示</button>
+          <button class="bulk-btn" onclick="bulkVisibility(false)">全て非表示</button>
+        </div>
+      </div>`;
+
+      const q = filterText.toLowerCase();
+      let hasAny = false;
+      GROUPS.forEach((group, gi) => {
+        if (q && !group.model.toLowerCase().includes(q) &&
+          !group.devices.some(d => String(d.num).includes(q))) return;
+        hasAny = true;
+        list.appendChild(makeGroupCard(group, gi));
+      });
+      if (!hasAny) list.innerHTML = `<div style="padding:20px;text-align:center;font-size:12px;color:var(--text-muted)">該当なし</div>`;
+    }
+
+    // ===== イベントハンドラ =====
+    function handleGroupToggle(gi) {
+      const group = GROUPS[gi];
+      if (!group) return;
+      const allOn = group.devices.every(d => visibility[d.key]);
+      group.devices.forEach(d => { visibility[d.key] = !allOn; });
+      render();
+      // 親トグルで表示にした時だけ、その端末の全軌跡が収まるようフォーカスする（非表示にした時は動かさない）
+      if (!allOn) focusVisibleTracksInGroup(group);
+    }
+    function toggleGroupExpand(gi) {
+      groupExpanded[gi] = !groupExpanded[gi];
+      updateSidebar();
+    }
+    function expandAllGroups(expand) {
+      GROUPS.forEach((g, gi) => { if (isGroupExpandable(g)) groupExpanded[gi] = expand; });
+      updateSidebar();
+    }
+    function onFilter(val) { filterText = val; updateSidebar(); }
+    function bulkVisibility(show) { DEVICES.forEach(d => { visibility[d.key] = show; }); render(); }
+
+    // ===== 配布データCSV読み込み =====
+    // 想定フォーマット: 「日付」「端末」「GPS」の3列。GPS列は
+    //   [{"date":<unix秒>,"status":"start"|"finish"|"confirmed"|"","lat":..,"lon":..}, ...]
+    // というJSON配列文字列（CSV上はダブルクオートが""にエスケープされた1フィールド）。
+    // ・1日分・複数端末のエクスポート → 行ごとに日付が同一 → 各行を別端末として表示
+    // ・1端末・全配布日のエクスポート  → 行ごとに日付が異なる → 全行を同一端末(同一グループ)として表示
+
+    // バイト列 → 文字列（UTF-8優先、失敗時はShift_JISにフォールバック。先頭BOM除去）
+    function decodeBytesAuto(bytes) {
+      let text;
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+      catch { text = new TextDecoder('shift_jis').decode(bytes); }
+      return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+    }
+    async function readFileTextAuto(file) {
+      const buf = await file.arrayBuffer();
+      return decodeBytesAuto(new Uint8Array(buf));
+    }
+
+    // RFC4180準拠の簡易CSVパーサ（クオート内の改行・カンマ・""エスケープに対応）
+    function parseCSVRows(text) {
+      const rows = [];
+      let row = [], field = '', inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (inQuotes) {
+          if (c === '"') {
+            if (text[i + 1] === '"') { field += '"'; i++; }
+            else { inQuotes = false; }
+          } else {
+            field += c;
+          }
+        } else if (c === '"') {
+          inQuotes = true;
+        } else if (c === ',') {
+          row.push(field); field = '';
+        } else if (c === '\r') {
+          // 無視（\nで行確定）
+        } else if (c === '\n') {
+          row.push(field); rows.push(row); row = []; field = '';
+        } else {
+          field += c;
+        }
+      }
+      if (field.length || row.length) { row.push(field); rows.push(row); }
+      return rows.filter(r => r.some(c => c !== ''));
+    }
+
+    // ヘッダーに"GPS"列があるか、データ行にJSON配列らしき列があるかで配布データCSVと判定
+    // （配布日が1件もない端末はヘッダー行だけのCSVになるため、データ行が無くても認識できるようにする）
+    function looksLikeDistributionCSV(rows) {
+      if (!rows || !rows.length) return false;
+      const header = (rows[0] || []).map(h => (h || '').trim());
+      if (header.some(h => h.toUpperCase() === 'GPS')) return true;
+      for (let i = 1; i < Math.min(rows.length, 4); i++) {
+        const r = rows[i] || [];
+        if (r.some(c => typeof c === 'string' && c.trim().startsWith('[{'))) return true;
+      }
+      return false;
+    }
+
+    // 行配列 → {dateStr, label, pts}[]
+    function extractDistributionRecords(rows) {
+      if (rows.length < 2) return [];
+      const header = rows[0].map(h => (h || '').trim());
+      let gpsIdx = header.findIndex(h => h.toUpperCase() === 'GPS');
+      if (gpsIdx === -1) {
+        for (let i = 1; i < rows.length; i++) {
+          const idx = rows[i].findIndex(c => typeof c === 'string' && c.trim().startsWith('['));
+          if (idx !== -1) { gpsIdx = idx; break; }
+        }
+      }
+      if (gpsIdx === -1) gpsIdx = rows[0].length - 1;
+
+      const otherIdx = [...Array(Math.max(rows[0].length, gpsIdx + 1)).keys()].filter(i => i !== gpsIdx);
+      const dateIdx = otherIdx[0] ?? 0;
+      const labelIdx = otherIdx[1] ?? (otherIdx[0] ?? 1);
+
+      const records = [];
+      for (let i = 1; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r || r.length <= gpsIdx) continue;
+        const gpsRaw = (r[gpsIdx] || '').trim();
+        if (!gpsRaw.startsWith('[')) continue;
+        let pts;
+        try { pts = JSON.parse(gpsRaw); } catch (e) { console.warn('GPS列のJSON解析に失敗:', e); pts = []; }
+        if (!Array.isArray(pts)) pts = [];
+        // 点数が0件（解析失敗 or 空配列）でも行自体は端末データとして残す（noDataとして表示するため）
+        records.push({ dateStr: (r[dateIdx] || '').trim(), label: (r[labelIdx] || '').trim(), pts });
+      }
+      return records;
+    }
+
+    // GPS点配列 → [[lat, lon, timeMs], ...]（時刻昇順）
+    function pointsToCoords(pts) {
+      const coords = [];
+      for (const p of pts) {
+        if (!p) continue;
+        const lat = Number(p.lat), lon = Number(p.lon), t = Number(p.date);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(t)) continue;
+        coords.push([lat, lon, t * 1000]);
+      }
+      coords.sort((a, b) => a[2] - b[2]);
+      return coords;
+    }
+
+    // "[37-1340] 高松Aエリア" → { company:"37-1340", model:"高松Aエリア" }
+    function parseDistributionLabel(label) {
+      const s = (label || '').trim();
+      const m = /^\[([^\]]+)\]\s*(.*)$/.exec(s);
+      if (m) {
+        const company = m[1].trim();
+        const model = m[2].trim() || company;
+        return { company, model };
+      }
+      return { company: '', model: s || '端末' };
+    }
+
+    // CSVの行データ(records) → 軌跡アイテム配列。「1日複数端末」か「1端末複数日」かを
+    // ファイル単位で自動判定し、後者なら最古日のラベルで全行を1グループに統合する。
+    function buildCSVItems(records) {
+      const uniqueDates = new Set(records.map(r => r.dateStr).filter(Boolean));
+      const multiDayMode = uniqueDates.size > 1;
+
+      let sharedIdentity = null;
+      if (multiDayMode) {
+        const sorted = [...records].sort((a, b) => (a.dateStr || '').localeCompare(b.dateStr || ''));
+        sharedIdentity = parseDistributionLabel(sorted[0].label);
+      }
+
+      const items = [];
+      const usedModels = new Set();
+      records.forEach((rec, i) => {
+        const coords = pointsToCoords(rec.pts);
+        let company, model;
+        if (multiDayMode) {
+          company = sharedIdentity.company;
+          model = sharedIdentity.model;
+        } else {
+          const parsed = parseDistributionLabel(rec.label);
+          company = parsed.company;
+          model = parsed.model;
+          if (usedModels.has(model)) model = `${model}#${i + 1}`; // 同名衝突時の保険
+        }
+        usedModels.add(model);
+        // 座標が0件でもエラーにせず、noData端末として残す
+        // dateKeyは重複読込判定用（このCSV行自体の日付。multiDayModeでも共有identityではなく行ごとの日付を使う）
+        items.push({
+          coords, company, model, rawLabel: rec.label || model, noData: !coords.length,
+          dateKey: (rec.dateStr || '').replace(/\D/g, ''),
+        });
+      });
+      return items;
+    }
+
+    // ===== 選択ファイル群 → 読み込みソース一覧への展開 =====
+    // ZIPは中身を展開して.gpx/.csv/.itm/.jsonエントリをそれぞれ拾う。プレーンな.gpx/.csv/.itm/.jsonはそのまま1ソースとする。
+    async function expandSources(files) {
+      const sources = []; // { name, kind:'gpx'|'csv'|'itm'|'json', getText/getBuffer, warn? }
+      for (const file of files) {
+        const lower = file.name.toLowerCase();
+        if (lower.endsWith('.zip')) {
+          let zip;
+          try {
+            zip = await JSZip.loadAsync(file, {
+              decodeFileName: bytes => {
+                try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+                catch { return new TextDecoder('shift_jis').decode(bytes); }
+              }
+            });
+          } catch (e) {
+            if (isOutOfMemoryError(e)) throw e;
+            sources.push({ name: file.name, kind: 'warn', warn: `${file.name}: ZIPの読み込みに失敗しました` });
+            continue;
+          }
+          const entries = Object.values(zip.files).filter(f => !f.dir);
+          const gpxEntries = entries.filter(f => stripNulSuffix(f.name).toLowerCase().endsWith('.gpx'));
+          const csvEntries = entries.filter(f => stripNulSuffix(f.name).toLowerCase().endsWith('.csv'));
+          const itmEntries = entries.filter(f => stripNulSuffix(f.name).toLowerCase().endsWith('.itm'));
+          const jsonEntries = entries.filter(f => stripNulSuffix(f.name).toLowerCase().endsWith('.json'));
+          if (!gpxEntries.length && !csvEntries.length && !itmEntries.length && !jsonEntries.length) {
+            sources.push({ name: file.name, kind: 'warn', warn: `${file.name}: ZIP内にGPX/CSV/ITM/JSONが見つかりません` });
+          }
+          gpxEntries.forEach(entry => {
+            const name = stripNulSuffix(entry.name).split('/').pop();
+            sources.push({ name, kind: 'gpx', getText: () => entry.async('string') });
+          });
+          csvEntries.forEach(entry => {
+            const name = stripNulSuffix(entry.name).split('/').pop();
+            sources.push({ name, kind: 'csv', getText: async () => decodeBytesAuto(await entry.async('uint8array')) });
+          });
+          itmEntries.forEach(entry => {
+            const name = stripNulSuffix(entry.name).split('/').pop();
+            sources.push({ name, kind: 'itm', getBuffer: () => entry.async('arraybuffer') });
+          });
+          jsonEntries.forEach(entry => {
+            const name = stripNulSuffix(entry.name).split('/').pop();
+            sources.push({ name, kind: 'json', getText: () => entry.async('string') });
+          });
+        } else if (lower.endsWith('.gpx')) {
+          sources.push({ name: file.name, kind: 'gpx', getText: () => file.text() });
+        } else if (lower.endsWith('.csv')) {
+          sources.push({ name: file.name, kind: 'csv', getText: () => readFileTextAuto(file) });
+        } else if (lower.endsWith('.itm')) {
+          sources.push({ name: file.name, kind: 'itm', getBuffer: () => file.arrayBuffer() });
+        } else if (lower.endsWith('.json')) {
+          sources.push({ name: file.name, kind: 'json', getText: () => file.text() });
+        } else {
+          sources.push({ name: file.name, kind: 'warn', warn: `${file.name}: 対応していない形式です（.zip/.gpx/.csv/.itm/.jsonのみ）` });
+        }
+      }
+      return sources;
+    }
+
+    // ===== ファイル読み込み（複数ファイル・ZIP内CSV対応・既存データへ追加） =====
+    async function loadTrackFiles(files) {
+      const pb = document.getElementById('progress-bar'), pf = document.getElementById('progress-fill');
+      const btn = document.getElementById('trackBtn');
+      pb.style.display = 'block'; pf.style.width = '5%';
+      btn.style.pointerEvents = 'none';
+      btn.textContent = '⏳ 読み込み中...';
+
+      const warnings = [];
+      try {
+        const sources = await expandSources(files);
+        warnings.push(...sources.filter(s => s.kind === 'warn').map(s => s.warn));
+        pf.style.width = '20%';
+
+        const newItems = []; // { coords, model, company, num?, rawLabel? }
+
+        const gpxSources = sources.filter(s => s.kind === 'gpx');
+        for (let i = 0; i < gpxSources.length; i++) {
+          pf.style.width = `${20 + Math.round((i / Math.max(1, gpxSources.length)) * 20)}%`;
+          const s = gpxSources[i];
+          try {
+            const text = await s.getText();
+            const parsed = await parseGPXSource(s.name, text);
+            newItems.push({ ...parsed });
+          } catch (e) {
+            if (isOutOfMemoryError(e)) throw e;
+            warnings.push(`${s.name}: 読み込みに失敗しました`);
+            console.warn('GPX parse error:', s.name, e);
+          }
+        }
+
+        const csvSources = sources.filter(s => s.kind === 'csv');
+        for (let i = 0; i < csvSources.length; i++) {
+          pf.style.width = `${40 + Math.round((i / Math.max(1, csvSources.length)) * 15)}%`;
+          const s = csvSources[i];
+          try {
+            const text = await s.getText();
+            const rows = parseCSVRows(text);
+            if (!looksLikeDistributionCSV(rows)) { warnings.push(`${s.name}: CSVの形式を認識できません`); continue; }
+            const records = extractDistributionRecords(rows);
+            if (!records.length) {
+              // ヘッダーのみ（配布日が0件の端末）→ ファイル名を端末名としてデータなし表示
+              const model = s.name.replace(/\.csv$/i, '') || s.name;
+              newItems.push({ coords: [], company: '', model, rawLabel: s.name, noData: true, dateKey: '' });
+              continue;
+            }
+            newItems.push(...buildCSVItems(records));
+          } catch (e) {
+            if (isOutOfMemoryError(e)) throw e;
+            warnings.push(`${s.name}: 読み込みに失敗しました`);
+            console.warn('CSV parse error:', s.name, e);
+          }
+        }
+
+        const itmSources = sources.filter(s => s.kind === 'itm');
+        for (let i = 0; i < itmSources.length; i++) {
+          pf.style.width = `${55 + Math.round((i / Math.max(1, itmSources.length)) * 20)}%`;
+          const s = itmSources[i];
+          try {
+            const buf = await s.getBuffer();
+            const parsed = await parseITMSource(s.name, buf);
+            newItems.push({ ...parsed });
+          } catch (e) {
+            if (isOutOfMemoryError(e)) throw e;
+            warnings.push(`${s.name}: 読み込みに失敗しました`);
+            console.warn('ITM parse error:', s.name, e);
+          }
+        }
+
+        const jsonSources = sources.filter(s => s.kind === 'json');
+        for (let i = 0; i < jsonSources.length; i++) {
+          pf.style.width = `${75 + Math.round((i / Math.max(1, jsonSources.length)) * 13)}%`;
+          const s = jsonSources[i];
+          try {
+            const text = await s.getText();
+            const parsed = await parseJSONSource(s.name, text);
+            newItems.push({ ...parsed });
+          } catch (e) {
+            if (isOutOfMemoryError(e)) throw e;
+            warnings.push(`${s.name}: 読み込みに失敗しました`);
+            console.warn('JSON parse error:', s.name, e);
+          }
+        }
+
+        if (!newItems.length) {
+          alert(`有効な軌跡データが見つかりませんでした。${warnings.length ? '\n\n' + warnings.join('\n') : ''}`);
+          return;
+        }
+
+        // 重複読込防止：「会社+端末+日付+ファイル内連番」が既読み込み分と一致するものは除外
+        // （同じ端末の別の日のデータは正しく追加され、同じ端末・同じ日・同じ連番のものだけ無言でスキップされる。
+        //   連番(num)を含めることで、同じ端末・同じ日に複数ファイルへ分割されたデータ（_1.gpx, _2.gpxなど）が
+        //   誤って重複と判定され読み込まれなくなる不具合を防ぐ）
+        // 会社・端末名がどちらも空（ファイル名がアンダースコア区切り規約に沿わないGPX、例: RouteHistoryの
+        // 「Log20260715-122333.gpx」形式）の場合は company/model/num で区別が付かず、同日の別ログ同士が
+        // 同一キーとみなされて片方が誤って捨てられてしまう。この場合は元ファイル名をキーに使い区別する。
+        const dedupedItems = newItems.filter(it => {
+          const dkey = (it.company || it.model)
+            ? `${it.company || ''}|${it.model}|${it.dateKey || ''}|${it.num ?? ''}`
+            : `${it.sourceName || ''}|${it.dateKey || ''}`;
+          if (loadedKeys.has(dkey)) {
+            console.log('重複のためスキップ:', it.rawLabel || it.model);
+            return false;
+          }
+          loadedKeys.add(dkey);
+          return true;
+        });
+
+        if (!dedupedItems.length) return; // 全て既読み込み済み → 何もせず終了
+        pf.style.width = '88%';
+
+        // 色は永続マップに無いキーだけ新規割当（既存端末の色は維持）。
+        // ロガーID（モデル名・会社名）が無いデータは全て空文字modelを共有してしまい同色になるため、
+        // buildGroups()のグループキーと同様にファイル名（rawLabel）ごとに別キーで色分けする
+        const colorKeyOf = it => (it.model || it.company) ? it.model : (it.rawLabel || it.sourceName || it.model);
+        dedupedItems.forEach(it => {
+          const ck = colorKeyOf(it);
+          if (!(ck in modelColorMap)) modelColorMap[ck] = deviceColor(nextColorIdx++);
+        });
+
+        dedupedItems.forEach(it => {
+          const key = `t${nextDeviceSeq++}`;
+          const num = it.num ?? nextDeviceSeq;
+          DEVICES.push({
+            key, color: modelColorMap[colorKeyOf(it)],
+            num, model: it.model, company: it.company, rawLabel: it.rawLabel,
+            noData: !!it.noData,
+          });
+          GPX_DATA[key] = it.coords;
+          GPX_SPEEDS[key] = calcSpeeds(it.coords);
+          GPX_AVG_SPEED[key] = computeTrajectoryAvgSpeed(it.coords);
+          visibility[key] = true;
+        });
+
+        buildGroups();
+        await initMapLayers(); // 既存デバイスはスキップされ、新規分だけレイヤーが追加される
+        document.getElementById('trackGroup').classList.add('loaded');
+        pf.style.width = '100%';
+        render();
+        computeVisitEstimates(); // 新しい軌跡データを反映して町丁目集計を再計算する
+
+        if (warnings.length) {
+          alert(`一部のファイルは読み込めませんでした:\n${warnings.join('\n')}`);
+        }
+      } catch (e) {
+        if (isOutOfMemoryError(e)) {
+          alert('メモリ不足のため読み込みを中断しました。\nファイル数や1ファイルあたりのデータ量を減らしてから再度お試しください。');
+        } else {
+          console.error(e);
+          alert(`読み込み中にエラーが発生しました。\n${e.message || e}`);
+        }
+      } finally {
+        btn.textContent = DEVICES.length ? '🗜 GPXデータを追加する' : '🗜 GPXデータ読み込み';
+        btn.style.pointerEvents = '';
+        setTimeout(() => { pb.style.display = 'none'; pf.style.width = '0%'; }, 500);
+      }
+    }
+
+    // 読み込み済みの全軌跡データ（GPX/CSV共通）をクリア
+    function clearTrackData() {
+      if (!DEVICES.length) return;
+      if (!confirm('読み込んだ軌跡データをすべてクリアしますか？')) return;
+
+      clearMapLayers();
+      DEVICES = []; GROUPS = []; GPX_DATA = {}; GPX_SPEEDS = {}; GPX_AVG_SPEED = {};
+      visibility = {}; filterText = ''; groupExpanded = {};
+      modelColorMap = {}; nextColorIdx = 0; nextDeviceSeq = 0; loadedKeys = new Set();
+
+      document.getElementById('trackGroup').classList.remove('loaded');
+      document.getElementById('trackBtn').textContent = '🗜 GPXデータ読み込み';
+      render();
+      computeVisitEstimates();
+    }
+
+    // ===== ファイル入力（複数選択・拡張子からZIP/GPX/CSVを自動判別） =====
+    document.getElementById('folderInput').addEventListener('change', async function () {
+      const files = Array.from(this.files);
+      this.value = '';
+      if (!files.length) return;
+      await loadTrackFiles(files);
+    });
+
+    // ===== CSVレポート =====
+    document.getElementById('csvReportInput').addEventListener('change', async function () {
+      const files = Array.from(this.files);
+      this.value = '';
+      if (!files.length) return;
+      for (const file of files) {
+        await loadCSVReport(file);
+      }
+    });
+
+    // ===== 境界データ（簡略化済みGeoJSON、都道府県→市区町村単位に分割してGitHub Pagesからfetch） =====
+    // 配置規約: アプリ(index.html)と同じ場所に
+    //   boundaries/<都道府県コード2桁>/index.json          … その県の市区町村一覧（コード・名称・世帯数のみ、ジオメトリなし）
+    //   boundaries/<都道府県コード2桁>/<市区町村コード>.geojson … 個々の市区町村のポリゴン
+    // を置く（操作マニュアル.pdfをアプリと同じ場所に置く既存の規約と同じ考え方）。
+    // 県単位ではなく市区町村単位に分割しているのは、県全体（最大10MB超）を毎回まとめて取得すると
+    // 住所データが多い環境で表示が重くなるため。一覧表示に必要な名称・世帯数は軽量なindex.jsonだけで揃い、
+    // 実際のポリゴン（ジオメトリ）は市区町村トグルをONにした時だけ個別に取得する（ensureCityGeometry参照）。
+    function boundaryIndexUrl(prefCode) {
+      return `boundaries/${prefCode}/index.json`;
+    }
+    function boundaryCityGeoJSONUrl(prefCode, cityCode) {
+      return `boundaries/${prefCode}/${cityCode}.geojson`;
+    }
+
+    async function fetchBoundaryIndex(prefCode) {
+      const res = await fetch(boundaryIndexUrl(prefCode));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    async function fetchCityGeoJSON(prefCode, cityCode) {
+      const res = await fetch(boundaryCityGeoJSONUrl(prefCode, cityCode));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
+    // 都道府県コードを指定して境界データ（市区町村一覧のみ、ジオメトリなし）を取得・読込する共通処理。
+    // 取得失敗（オフライン・ファイル未配置等）はここでalertし、読込処理自体は呼び出し元に例外を投げない
+    // （CSV自動読込時にループの途中で止まらないようにするため）。
+    // opts.auto: 住所コードCSV由来の自動読込。CSVは市区町村トグルを介さず任意の住所コードを直接照合するため、
+    //            この場合だけ県内全市区町村のジオメトリもこの時点でまとめて取得しておく（そうしないと
+    //            トグルONにしていない市区町村の住所コードが一切照合できなくなってしまうため）。
+    async function loadPrefectureByCode(prefCode, opts = {}) {
+      // 一覧（index）は県単位で1回取得すれば十分。既に読み込み済みならここは再取得しない
+      // （手動で読み込んだ県をCSV自動読込がここで再度loadBoundaryIndexしてしまうと、
+      // opts.autoによりautoPrefCodesへ誤って追加され「手動選択した県は住所コード解除で
+      // 自動解除しない」という既存仕様が崩れるため、意図的にスキップしている）
+      if (!loadedPrefCodes.has(prefCode)) {
+        let index;
+        try {
+          index = await fetchBoundaryIndex(prefCode);
+        } catch (e) {
+          console.error(e);
+          if (location.protocol === 'file:') {
+            alert(`${PREF_NAMES[prefCode] || prefCode}の境界データ取得に失敗しました。\nこのファイルをローカルで直接開いているため取得できません（ブラウザの仕様上の制限）。GitHub PagesのURL（https://...）からアクセスしてください。`);
+          } else {
+            alert(`${PREF_NAMES[prefCode] || prefCode}の境界データ取得に失敗しました。\nインターネット接続、またはGitHub Pages側のファイル配置(boundaries/${prefCode}/index.json)を確認してください。`);
+          }
+          return;
+        }
+
+        try {
+          loadBoundaryIndex(prefCode, index, opts);
+        } catch (e) {
+          console.error(e);
+          alert(`境界データの読み込みに失敗しました。\n${e.message}`);
+          return;
+        }
+      }
+
+      if (opts.auto) {
+        // 住所コードCSVは市区町村トグルを介さず任意の住所コードを直接照合するため、県内全市区町村の
+        // ジオメトリが必要。既にensureCityGeometryで取得済みの市区町村はそこでスキップされる
+        const keysInPref = Object.keys(cityNames).filter(k => cityPrefCodes[k] === prefCode);
+        let processed = 0;
+        for (const key of keysInPref) {
+          try { await ensureCityGeometry(key); } catch (e) { console.error(e); }
+          processed++;
+          if (processed % 5 === 0) await yieldToUI();
+        }
+        fullyFetchedPrefCodes.add(prefCode);
+        buildTownSpatialIndex();
+        computeVisitEstimates();
+      }
+    }
+
+    // 都道府県indexの内容をcityNames等の一覧状態へマージする（ジオメトリを含まない軽量データ）
+    function loadBoundaryIndex(prefCode, index, opts = {}) {
+      const cities = Array.isArray(index) ? index : index.cities;
+      if (!cities?.length) throw new Error('市区町村一覧が見つかりませんでした');
+
+      if (boundaryFeatureCount === 0) {
+        // 初回読み込み時のみ塗り濃度をリセット
+        cityFillOpacity = 0.40;
+        const slider = document.getElementById('fillOpacitySlider');
+        if (slider) { slider.value = 40; document.getElementById('fillOpacityVal').textContent = '40%'; }
+      }
+
+      cities.forEach(c => {
+        const key = c.key || c.code;
+        cityNames[key] = c.name;
+        cityCodes[key] = c.code;
+        cityPrefCodes[key] = c.prefCode || prefCode;
+        citySetai[key] = c.setai || 0;
+        if (!(key in cityVisibility)) cityVisibility[key] = false;
+      });
+
+      loadedPrefCodes.add(prefCode);
+      if (opts.auto) autoPrefCodes.add(prefCode); else autoPrefCodes.delete(prefCode);
+
+      if (csvMode) {
+        // CSVモード: 市区町村リストは表示せず町丁目フィルタを適用
+        applyCSVFilter();
+      } else {
+        cityFilterText = '';
+        document.getElementById('cityFilterInput').value = '';
+        updateCityList();
+      }
+
+      // 境界データ（一覧）が読み込まれたので、集計に関わるコントロール類を表示する
+      document.getElementById('restDurationRow').style.display = '';
+      document.getElementById('secPerUnitRow').style.display = '';
+      document.getElementById('transitSpeedRow').style.display = '';
+    }
+
+    // 指定した市区町村keyのジオメトリ（allFeaturesByCode等）を取得する。取得済みなら何もしない
+    // （cityTownCodes[key]の有無を取得済み判定に使う。一度取得したらセッション中はキャッシュし続け、
+    // トグルOFF→ONを繰り返しても再fetchしない）。空間インデックス・集計の再構築は呼び出し側の責任
+    // （複数市区町村をまとめて取得する場合に、都度の再構築で重複コストがかからないようにするため）。
+    async function ensureCityGeometry(key) {
+      if (cityTownCodes[key]) return;
+      const prefCode = cityPrefCodes[key];
+      const code = cityCodes[key];
+      if (!prefCode || !code) return;
+
+      const geojson = await fetchCityGeoJSON(prefCode, code);
+      const townCodes = [];
+      (geojson.features || []).forEach(f => {
+        const townCode = String(f.properties?.KEY_CODE || f.properties?.KEYCODE || '').trim();
+        if (!townCode) return;
+        (allFeaturesByCode[townCode] || (allFeaturesByCode[townCode] = [])).push(f);
+        townSetaiByCode[townCode] = (townSetaiByCode[townCode] || 0) + (parseInt(f.properties?.SETAI, 10) || 0);
+        cityKeyByTownCode[townCode] = key;
+        townCodes.push(townCode);
+      });
+      cityTownCodes[key] = townCodes;
+      boundaryFeatureCount += (geojson.features || []).length;
+    }
+
+    // 市区町村keyのLeafletレイヤーを返す（未構築なら、必要に応じてジオメトリ取得も行った上で構築しキャッシュする）。
+    // 市区町村トグルをONにした時だけ呼ばれ、非表示のままの市区町村では構築されない
+    // （＝重いPathオブジェクト・イベント登録・ネットワーク取得のいずれも発生しない、が①③の要）。
+    async function ensureCityLayer(key) {
+      if (cityGroups[key]) return cityGroups[key];
+
+      const isNewFetch = !cityTownCodes[key];
+      if (isNewFetch) { cityLoadingKeys.add(key); updateCityList(); }
+      try {
+        await ensureCityGeometry(key);
+      } finally {
+        if (isNewFetch) cityLoadingKeys.delete(key);
+      }
+      if (isNewFetch) {
+        // 新規に取得したジオメトリ分だけ空間インデックス・GPS集計を更新する
+        buildTownSpatialIndex();
+        computeVisitEstimates();
+      }
+
+      const townCodes = cityTownCodes[key] || [];
+      const features = [];
+      townCodes.forEach(tc => { const f = allFeaturesByCode[tc]; if (f) features.push(...f); });
+      const layer = buildCityGeoJSONLayer(features);
+      cityGroups[key] = layer;
+      return layer;
+    }
+
+    // 指定した都道府県コード群の境界データ（市区町村レイヤー・町丁目インデックス等）だけを取り除く。
+    // 住所コード解除時の自動読込データのクリーンアップ、および都道府県選択モーダルでのチェック解除による
+    // 個別解除の両方から呼ばれる純粋なデータ操作（表示更新は呼び出し側の責任）。
+    function unloadPrefectures(prefCodesToRemove) {
+      Object.keys(cityNames).forEach(key => {
+        if (!prefCodesToRemove.has(cityPrefCodes[key])) return;
+        const g = cityGroups[key];
+        if (g && map.hasLayer(g)) map.removeLayer(g);
+        delete cityGroups[key];
+        delete cityVisibility[key];
+        delete citySetai[key];
+        delete cityCodes[key];
+        delete cityNames[key];
+        delete cityPrefCodes[key];
+        delete cityTownCodes[key];
+        cityLoadingKeys.delete(key);
+      });
+
+      Object.keys(allFeaturesByCode).forEach(code => {
+        if (!prefCodesToRemove.has(code.slice(0, 2))) return;
+        delete allFeaturesByCode[code];
+        delete townSetaiByCode[code];
+        delete cityKeyByTownCode[code];
+      });
+
+      prefCodesToRemove.forEach(pc => {
+        loadedPrefCodes.delete(pc);
+        autoPrefCodes.delete(pc);
+        fullyFetchedPrefCodes.delete(pc);
+      });
+
+      boundaryFeatureCount = Object.values(allFeaturesByCode).reduce((s, arr) => s + arr.length, 0);
+      buildTownSpatialIndex();
+    }
+
+    // ===== 境界設定ペイン：都道府県トグル表示段階 =====
+    // 都道府県は静的な47件の一覧のため、フェッチ不要で常にすぐ表示できる
+    // （実際のポリゴン取得は「市区町村を表示する」を押した時点で選択中の県だけ行う）
+    function renderPrefStage() {
+      const q = cityFilterText.toLowerCase().replace(/\s+/g, '');
+      // Object.keys()は'10'〜'47'のような整数形式の文字列キーを昇順で先頭に並べ替えてしまう
+      // （'01'〜'09'は非正規形なので挿入順のまま）ため、明示的に文字列ソートして01→47の順に揃える
+      const matched = Object.keys(PREF_NAMES).sort().filter(code => !q || PREF_NAMES[code].toLowerCase().includes(q));
+
+      document.getElementById('cityCount').textContent = `${prefSelected.size}件選択`;
+
+      const hdr = document.getElementById('cityListHeader');
+      hdr.innerHTML = '<div class="h-toggle"></div><span class="h-name">都道府県名</span>';
+      hdr.style.display = 'flex';
+
+      const el = document.getElementById('cityList');
+      el.innerHTML = '';
+      matched.forEach(code => {
+        const on = prefSelected.has(code);
+        const row = document.createElement('div');
+        row.className = 'city-row';
+
+        const tog = document.createElement('div');
+        tog.className = 'city-toggle' + (on ? ' on' : '');
+
+        const nm = document.createElement('span');
+        nm.className = 'city-name';
+        nm.textContent = PREF_NAMES[code];
+
+        row.appendChild(tog);
+        row.appendChild(nm);
+        row.addEventListener('click', () => togglePref(code));
+        el.appendChild(row);
+      });
+      if (!el.children.length)
+        el.innerHTML = '<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">該当なし</div>';
+
+      updateBoundaryStepper();
+    }
+
+    function togglePref(code) {
+      if (prefSelected.has(code)) prefSelected.delete(code); else prefSelected.add(code);
+      renderPrefStage();
+    }
+
+    // 「全て表示/全て非表示」の都道府県トグル表示段階版（現在の絞り込みに一致する県だけを対象にする）
+    function bulkPrefVisibility(show) {
+      const q = cityFilterText.toLowerCase().replace(/\s+/g, '');
+      Object.keys(PREF_NAMES).forEach(code => {
+        if (q && !PREF_NAMES[code].toLowerCase().includes(q)) return;
+        if (show) prefSelected.add(code); else prefSelected.delete(code);
+      });
+      renderPrefStage();
+    }
+
+    // 市区町村一覧の絞り込み条件（cityFilterText）に一致するかどうかを判定する（bulkCityVisibilityと共用）
+    function cityMatchesFilter(key, q) {
+      if (!q) return true;
+      const searchText = ((PREF_NAMES[cityPrefCodes[key]] || '') + (cityNames[key] || key)).toLowerCase().replace(/\s+/g, '');
+      return searchText.includes(q);
+    }
+
+    function updateCityList() {
+      const showStats = boundaryFeatureCount > 0;
+      document.getElementById('cityCount').textContent = `${Object.keys(cityNames).length}市区町村`;
+
+      const q = cityFilterText.toLowerCase().replace(/\s+/g, '');
+      const showPref = loadedPrefCodes.size > 1;
+      const matched = Object.keys(cityNames)
+        .filter(key => cityMatchesFilter(key, q))
+        .map(key => {
+          const prefNameFull = PREF_NAMES[cityPrefCodes[key]] || '';
+          const cityName = cityNames[key] || key;
+          const prefName = showPref ? prefNameFull : '';
+          const label = prefName ? `${prefName} ${cityName}` : cityName;
+          return { key, label };
+        })
+        .sort((a, b) => (cityCodes[a.key] || a.key).localeCompare(cityCodes[b.key] || b.key));
+
+      const hdr = document.getElementById('cityListHeader');
+      hdr.innerHTML =
+        '<div class="h-toggle"></div>' +
+        '<span class="h-name">市区町村名</span>' +
+        '<span class="h-stat">統計上<br>世帯数</span>' +
+        (showStats ? '<span class="h-stat">推定<br>配布数</span><span class="h-stat">充足<br>率</span>' : '');
+      hdr.style.display = 'flex';
+
+      const el = document.getElementById('cityList');
+      el.innerHTML = '';
+      matched.forEach(({ key, label }) => {
+        const on = cityVisibility[key];
+        const loading = cityLoadingKeys.has(key);
+        const setai = citySetai[key] || 0;
+        const row = document.createElement('div');
+        row.className = 'city-row';
+
+        const tog = document.createElement('div');
+        tog.className = 'city-toggle' + (on ? ' on' : '');
+        if (!loading) tog.addEventListener('click', () => toggleCity(key, !cityVisibility[key]));
+
+        const nm = document.createElement('span');
+        nm.className = 'city-name';
+        nm.textContent = (loading ? '⏳ ' : '') + label;
+
+        const ct = document.createElement('span');
+        ct.className = 'city-stat';
+        ct.title = '統計上世帯数（境界データのSETAIを参照）';
+        ct.textContent = setai > 0 ? setai.toLocaleString() : '—';
+
+        row.appendChild(tog);
+        row.appendChild(nm);
+        row.appendChild(ct);
+
+        if (showStats) {
+          const ms = cityDeliveryStats[key];
+          const hasHouseholds = ms && ms.households > 0;
+          const vs = document.createElement('span');
+          vs.className = 'city-stat';
+          vs.title = 'GPS滞在クラスタのポイント・イン・ポリゴン集計による推定配布数';
+          vs.textContent = hasHouseholds ? ms.visits.toLocaleString() : '—';
+
+          const rt = document.createElement('span');
+          rt.className = 'city-stat rate';
+          rt.title = 'GPS滞在クラスタのポイント・イン・ポリゴン集計による推定配布数の、配布数(実績)に対する割合';
+          rt.textContent = hasHouseholds ? ms.rate.toFixed(1) + '%' : '—';
+
+          row.appendChild(vs);
+          row.appendChild(rt);
+        }
+
+        el.appendChild(row);
+      });
+      if (!el.children.length)
+        el.innerHTML = '<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">該当なし</div>';
+
+      updateBoundaryStepper();
+    }
+
+    // ===== 境界設定ペイン：3段階（都道府県／市区町村／町丁目）のステッパー制御 =====
+    // 現段階で選択中（トグルON）の件数を見て、次の段階のボタンを押せるかどうかを判定する。
+    // ルール: 現在の段階のボタンは常に押せない（すでにそこにいるため）。
+    // 手前の段階へは常に戻れる。1つ先の段階へは、現在1件以上トグルONの時だけ進める。
+    // 2段階以上先（都道府県→町丁目など）へは直接進めない。
+    function updateBoundaryStepper() {
+      const idx = { pref: 0, city: 1, town: 2 }[boundaryLevel];
+      const countAtCurrent = boundaryLevel === 'pref'
+        ? prefSelected.size
+        : boundaryLevel === 'city'
+          ? Object.keys(cityVisibility).filter(k => cityVisibility[k]).length
+          : 0;
+      const enabledFor = i => i !== idx && (i < idx || (i === idx + 1 && countAtCurrent >= 1));
+
+      const prefBtn = document.getElementById('boundaryStepPrefBtn');
+      const cityBtn = document.getElementById('boundaryStepCityBtn');
+      const townBtn = document.getElementById('boundaryStepTownBtn');
+      prefBtn.disabled = !enabledFor(0);
+      cityBtn.disabled = !enabledFor(1);
+      townBtn.disabled = !enabledFor(2);
+      prefBtn.classList.toggle('active', boundaryLevel === 'pref');
+      cityBtn.classList.toggle('active', boundaryLevel === 'city');
+      townBtn.classList.toggle('active', boundaryLevel === 'town');
+    }
+
+    // ステッパーボタンのクリックハンドラ。段階の飛び越し・現在段階への再遷移はここで弾く
+    function goBoundaryStage(target) {
+      if (target === boundaryLevel) return;
+      // CSV由来の町丁目表示から離れる場合のみ、住所コードのキャンセルと同じ確認を挟む
+      if (boundaryLevel === 'town' && target !== 'town' && townStageFromCSV) {
+        if (!confirm('住所コードの読み込みをキャンセルしますか？')) return;
+      }
+      if (target === 'pref') { backToPrefStage(); return; }
+      if (target === 'city') {
+        if (boundaryLevel === 'pref') advanceToCityStage();
+        else if (boundaryLevel === 'town') backToCityStageFromTown();
+        return;
+      }
+      if (target === 'town' && boundaryLevel === 'city') advanceToTownStage();
+    }
+
+    // 都道府県トグル表示段階へ入る（都道府県一覧は選択中の状態を読み込み済み都道府県から作り直す）
+    function enterPrefStage() {
+      boundaryLevel = 'pref';
+      prefSelected = new Set(loadedPrefCodes);
+      document.getElementById('boundarySectionTitle').textContent = '境界設定（都道府県）';
+      document.getElementById('cityFilterInput').placeholder = '都道府県で絞り込み';
+      cityFilterText = '';
+      document.getElementById('cityFilterInput').value = '';
+      renderPrefStage();
+    }
+
+    // 市区町村トグル表示段階へ入る（cityNamesは既に選択中の都道府県分だけになっている前提）。
+    // 都道府県トグル表示段階で外した分も含め、cityVisibilityの状態通りに地図上のレイヤーを揃え直す
+    // （表示ONの市区町村は、まだジオメトリ未取得ならここで取得される＝③の遅延fetchの効果が出る場所）
+    async function enterCityStage() {
+      boundaryLevel = 'city';
+      document.getElementById('boundarySectionTitle').textContent = '境界設定（市区町村）';
+      document.getElementById('cityFilterInput').placeholder = '市区町村で絞り込み';
+      cityFilterText = '';
+      document.getElementById('cityFilterInput').value = '';
+      updateCityList();
+      await showCityLayersPerVisibility();
+      updateCityList();
+    }
+
+    function hideAllCityLayers() {
+      Object.values(cityGroups).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
+    }
+
+    // cityVisibility[key]===trueの市区町村を地図上に揃える。未構築（未fetch）ならensureCityLayerが
+    // ジオメトリ取得＋レイヤー構築を行う（①③）。表示中のupdateCityListはensureCityLayer内部で
+    // ローディング表示のために呼ばれるため、ここでは完了を待つだけでよい
+    async function showCityLayersPerVisibility() {
+      const keys = Object.keys(cityNames).filter(key => cityVisibility[key]);
+      for (const key of keys) {
+        try {
+          const g = await ensureCityLayer(key);
+          if (!map.hasLayer(g)) g.addTo(map);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+
+    // 都道府県トグルで選択中の都道府県だけを読み込み、市区町村トグル表示段階へ進む
+    // （2県以上選択されている場合は表示が重くなる旨を確認する）
+    async function advanceToCityStage() {
+      const selected = [...prefSelected];
+      if (!selected.length) return;
+      if (selected.length >= 2 &&
+        !confirm(`選択した${selected.length}件の都道府県をすべて表示すると、表示が重くなる可能性があります。続行しますか？`)) return;
+
+      const toUnload = new Set([...loadedPrefCodes].filter(c => !prefSelected.has(c)));
+      if (toUnload.size) unloadPrefectures(toUnload);
+
+      const toFetch = selected.filter(c => !loadedPrefCodes.has(c));
+      if (toFetch.length) {
+        const prefBtn = document.getElementById('boundaryStepPrefBtn');
+        const cityBtn = document.getElementById('boundaryStepCityBtn');
+        const townBtn = document.getElementById('boundaryStepTownBtn');
+        const prevLabel = cityBtn.textContent;
+        prefBtn.disabled = cityBtn.disabled = townBtn.disabled = true;
+        cityBtn.textContent = '⏳ 読み込み中...';
+        try {
+          for (const prefCode of toFetch) await loadPrefectureByCode(prefCode);
+        } finally {
+          cityBtn.textContent = prevLabel;
+        }
+      }
+
+      await enterCityStage();
+    }
+
+    // 市区町村または町丁目トグル表示段階から、都道府県トグル表示段階へ戻る
+    // （読み込み済みデータ自体は破棄せず、地図上のレイヤーだけを外す。再度進めば再取得なしで即表示できる）
+    function backToPrefStage() {
+      if (boundaryLevel === 'town') teardownTownStage();
+      hideAllCityLayers();
+      enterPrefStage();
+    }
+
+    // 町丁目トグル表示段階の状態を後片付けする（住所コードCSV由来の自動取得都道府県はここで解除する）
+    function teardownTownStage() {
+      csvFilterGeneration++; // 実行中のapplyCSVFilter()があれば中断させる
+      Object.values(townLayers).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
+      townLayers = {};
+      csvTowns = [];
+      csvMode = false;
+      townFilterText = '';
+      townVisibility = {};
+      townStageFromCSV = false;
+
+      document.getElementById('csvReportGroup').classList.remove('loaded');
+      const btn = document.getElementById('csvReportBtn');
+      btn.textContent = '📊 住所コード読み込み';
+      btn.classList.remove('active');
+
+      if (autoPrefCodes.size) unloadPrefectures(new Set(autoPrefCodes));
+    }
+
+    // 町丁目トグル表示段階から、市区町村トグル表示段階へ戻る
+    async function backToCityStageFromTown() {
+      teardownTownStage();
+      await enterCityStage();
+      computeVisitEstimates();
+    }
+
+    // 表示中（トグルON）の市区町村から町丁目一覧を組み立て、町丁目トグル表示段階へ進む
+    // （5市区町村以上を対象にすると表示が重くなるため事前に確認する）
+    async function advanceToTownStage() {
+      const visibleKeys = Object.keys(cityVisibility).filter(key => cityVisibility[key]);
+      if (!visibleKeys.length) return;
+      if (visibleKeys.length >= 5 &&
+        !confirm(`選択した${visibleKeys.length}件の市区町村をすべて表示すると、表示が重くなる可能性があります。続行しますか？`)) return;
+
+      const keySet = new Set(visibleKeys);
+      const towns = [];
+      for (const townCode in cityKeyByTownCode) {
+        const key = cityKeyByTownCode[townCode];
+        if (!keySet.has(key)) continue;
+        const feats = allFeaturesByCode[townCode];
+        if (!feats || !feats.length) continue;
+        const p0 = feats[0].properties || {};
+        towns.push({
+          code: townCode,
+          prefName: PREF_NAMES[cityPrefCodes[key]] || '',
+          cityName: cityNames[key] || p0.CITY_NAME || '',
+          townName: p0.S_NAME || p0.name || townCode,
+          distributionCount: 0,
+        });
+      }
+      if (!towns.length) { alert('指定した市区町村内に町丁目データが見つかりません。'); return; }
+
+      Object.values(townLayers).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
+      hideAllCityLayers();
+
+      csvTowns = towns;
+      csvMode = true;
+      townLayers = {};
+      townFilterText = '';
+      townVisibility = {};
+      csvTowns.forEach(t => { townVisibility[t.code] = true; });
+      townStageFromCSV = false;
+
+      boundaryLevel = 'town';
+      document.getElementById('boundarySectionTitle').textContent = '境界設定（町丁目）';
+      document.getElementById('cityFilterInput').placeholder = '町丁目名で絞り込み';
+      document.getElementById('cityFilterInput').value = '';
+
+      applyCSVFilter();
+
+      document.getElementById('csvReportGroup').classList.add('loaded');
+      document.getElementById('csvReportBtn').classList.add('active');
+
+      updateBoundaryStepper();
+      // 対象範囲(住所コード欄の粒度)が変わるため、配布率を自動的に再集計する
+      computeVisitEstimates();
+    }
+
+    // 現在地図上に表示中の全レイヤーの外接範囲にfitBoundsする。新規に1件追加した時に、その1件だけの
+    // 範囲にズームしてしまうと既存の表示分が画面外に押し出され「追加のはずが表示がリセットされた」ように
+    // 見えてしまうため、常にすでに表示中のレイヤーも含めた範囲でフィットする（toggleCity/toggleTown共用）
+    function fitBoundsToVisibleLayers(layers) {
+      let bounds = null;
+      layers.forEach(g => {
+        if (!g || !map.hasLayer(g)) return;
+        const b = g.getBounds();
+        if (!b.isValid()) return;
+        bounds = bounds ? bounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast());
+      });
+      if (bounds && bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17, animate: false });
+      }
+    }
+
+    // 表示ONにする時だけジオメトリ取得が発生しうる（ensureCityLayer、①③）。取得中の多重クリックは
+    // cityLoadingKeysで防ぐ（updateCityList側でも取得中はトグルのクリックハンドラを外している）
+    async function toggleCity(key, show) {
+      if (cityLoadingKeys.has(key)) return;
+      cityVisibility[key] = show;
+      if (show) {
+        let g;
+        try {
+          g = await ensureCityLayer(key);
+        } catch (e) {
+          console.error(e);
+          cityVisibility[key] = false;
+          alert(`${cityNames[key] || key}の境界データ取得に失敗しました。\nインターネット接続を確認してください。`);
+          updateCityList();
+          return;
+        }
+        if (!map.hasLayer(g)) g.addTo(map);
+        fitBoundsToVisibleLayers(Object.keys(cityGroups).filter(k => cityVisibility[k]).map(k => cityGroups[k]));
+      } else {
+        const g = cityGroups[key];
+        if (g && map.hasLayer(g)) map.removeLayer(g);
+      }
+      updateCityList();
+    }
+
+    // 「全て表示/全て非表示」は、現在の絞り込み（cityFilterText）に一致する行だけを対象にする
+    // （絞り込みで隠れている市区町村の表示状態は変えない）。表示ONにする市区町村は順番にジオメトリを
+    // 取得するため（①③）、5件おきにUIへ制御を返してフリーズを防ぐ
+    async function bulkCityVisibility(show) {
+      if (boundaryLevel === 'pref') { bulkPrefVisibility(show); return; }
+      if (csvMode) { bulkTownVisibility(show); return; }
+      const q = cityFilterText.toLowerCase().replace(/\s+/g, '');
+      const keys = Object.keys(cityNames).filter(key => cityMatchesFilter(key, q));
+
+      if (!show) {
+        keys.forEach(key => {
+          cityVisibility[key] = false;
+          const g = cityGroups[key];
+          if (g && map.hasLayer(g)) map.removeLayer(g);
+        });
+        updateCityList();
+        return;
+      }
+
+      let processed = 0;
+      for (const key of keys) {
+        cityVisibility[key] = true;
+        try {
+          const g = await ensureCityLayer(key);
+          if (!map.hasLayer(g)) g.addTo(map);
+        } catch (e) {
+          console.error(e);
+          cityVisibility[key] = false;
+        }
+        processed++;
+        if (processed % 5 === 0) { updateCityList(); await yieldToUI(); }
+      }
+      updateCityList();
+    }
+
+    function onCityFilter(val) {
+      if (boundaryLevel === 'pref') { cityFilterText = val; renderPrefStage(); return; }
+      if (csvMode) { onTownFilter(val); return; }
+      cityFilterText = val; updateCityList();
+    }
+
+    function clearCityFilter() {
+      const input = document.getElementById('cityFilterInput');
+      input.value = '';
+      onCityFilter('');
+      input.focus();
+    }
+
+    let cityFillOpacity = 0.40;
+
+    function onFillOpacity(val) {
+      cityFillOpacity = val / 100;
+      if (csvMode) {
+        Object.values(townLayers).forEach(g => g.setStyle({ fillOpacity: cityFillOpacity }));
+      } else {
+        Object.values(cityGroups).forEach(g => g.setStyle({ fillOpacity: cityFillOpacity }));
+      }
+      document.getElementById('fillOpacityVal').textContent = val + '%';
+    }
+
+    // ===== メッシュ読み込み・配布率推定 =====
+    // 推定配布率ヒートマップの配色（データに依存しない固定グラデーション、起動時に1回だけ構築する）
+    function buildRateColorLUT() {
+      const stops = [
+        [0.00, [49,  54, 149]],
+        [0.11, [69, 117, 180]],
+        [0.22, [116,173, 209]],
+        [0.33, [171,217, 233]],
+        [0.44, [224,243, 248]],
+        [0.55, [254,224, 144]],
+        [0.67, [253,174,  97]],
+        [0.78, [244,109,  67]],
+        [0.89, [215, 48,  39]],
+        [1.00, [165,  0,  38]],
+      ];
+      const lut = new Array(256);
+      for (let i = 0; i < 256; i++) {
+        const t = i / 255;
+        let r = 165, g = 0, b = 38;
+        for (let s = 1; s < stops.length; s++) {
+          if (t <= stops[s][0]) {
+            const lo = stops[s - 1], hi = stops[s];
+            const frac = (t - lo[0]) / (hi[0] - lo[0]);
+            r = Math.round(lo[1][0] + frac * (hi[1][0] - lo[1][0]));
+            g = Math.round(lo[1][1] + frac * (hi[1][1] - lo[1][1]));
+            b = Math.round(lo[1][2] + frac * (hi[1][2] - lo[1][2]));
+            break;
+          }
+        }
+        lut[i] = 'rgb(' + r + ',' + g + ',' + b + ')';
+      }
+      return lut;
+    }
+    rateColorLUT = buildRateColorLUT();
+
+    // ----- 町丁目ポリゴンの空間インデックス（ポイント・イン・ポリゴン判定の高速化） -----
+    // 全町丁目フィーチャをフラット化し、bbox辺長中央値から動的にバケット粒度を決めて登録する
+    function buildTownSpatialIndex() {
+      townFeatureList = [];
+      townSpatialIdx = new Map();
+      if (typeof turf === 'undefined') return;
+
+      for (const [code, features] of Object.entries(allFeaturesByCode)) {
+        for (const f of features) {
+          if (!f.geometry) continue;
+          let bbox;
+          try { bbox = turf.bbox(f); } catch (e) { continue; }
+          townFeatureList.push({ code, geometry: f.geometry, bbox });
+        }
+      }
+      const n = townFeatureList.length;
+      if (n === 0) return;
+
+      const stride = Math.max(1, Math.floor(n / TOWN_SIZE_SAMPLE_N));
+      const latSizes = [], lonSizes = [];
+      for (let i = 0; i < n; i += stride) {
+        const b = townFeatureList[i].bbox;
+        latSizes.push(b[3] - b[1]);
+        lonSizes.push(b[2] - b[0]);
+      }
+      latSizes.sort((a, b) => a - b);
+      lonSizes.sort((a, b) => a - b);
+      const medianLat = latSizes[latSizes.length >> 1] || TOWN_BUCKET_MIN_DEG;
+      const medianLon = lonSizes[lonSizes.length >> 1] || TOWN_BUCKET_MIN_DEG;
+      townBucketLatDeg = Math.min(TOWN_BUCKET_MAX_DEG, Math.max(TOWN_BUCKET_MIN_DEG, medianLat * TOWN_BUCKET_FACTOR));
+      townBucketLonDeg = Math.min(TOWN_BUCKET_MAX_DEG, Math.max(TOWN_BUCKET_MIN_DEG, medianLon * TOWN_BUCKET_FACTOR));
+
+      for (let i = 0; i < n; i++) {
+        const [minLon, minLat, maxLon, maxLat] = townFeatureList[i].bbox;
+        const latB0 = Math.floor(minLat / townBucketLatDeg), latB1 = Math.floor(maxLat / townBucketLatDeg);
+        const lonB0 = Math.floor(minLon / townBucketLonDeg), lonB1 = Math.floor(maxLon / townBucketLonDeg);
+        for (let la = latB0; la <= latB1; la++) {
+          for (let lo = lonB0; lo <= lonB1; lo++) {
+            const key = la + ',' + lo;
+            let arr = townSpatialIdx.get(key);
+            if (!arr) { arr = []; townSpatialIdx.set(key, arr); }
+            arr.push(i);
+          }
+        }
+      }
+    }
+
+    // 座標(lat,lon)がどの町丁目ポリゴンに入るかを判定し、そのKEY_CODEを返す（該当なしはnull）
+    function findTownCodeAt(lat, lon) {
+      if (!townSpatialIdx || typeof turf === 'undefined') return null;
+      const key = Math.floor(lat / townBucketLatDeg) + ',' + Math.floor(lon / townBucketLonDeg);
+      const idxs = townSpatialIdx.get(key);
+      if (!idxs) return null;
+      const pt = turf.point([lon, lat]);
+      for (const i of idxs) {
+        const entry = townFeatureList[i];
+        const [minLon, minLat, maxLon, maxLat] = entry.bbox;
+        if (lat < minLat || lat > maxLat || lon < minLon || lon > maxLon) continue;
+        try {
+          if (turf.booleanPointInPolygon(pt, entry.geometry)) return entry.code;
+        } catch (e) { /* 不正なジオメトリはスキップ */ }
+      }
+      return null;
+    }
+
+    // 推定配布率ヒートマップ（町丁目単位コロプレス）の表示/非表示を切り替える
+    function toggleRateHeatmap() {
+      rateHeatmapVisible = !rateHeatmapVisible;
+      document.getElementById('rateHeatmapToggleBtn').classList.toggle('active', rateHeatmapVisible);
+      applyBoundaryColorStyle();
+    }
+
+    // 配布率(0-100+%)をヒートマップのカラーLUTと同じ配色スケールに変換する
+    // 50%をLUT中央（寒色/暖色の境界）に固定した線形スケール。100%以上は最暖色で飽和させる
+    function rateFillColor(rate) {
+      if (!rateColorLUT) return '#FFFBBB';
+      const t = Math.min(1, Math.max(0, rate / 100));
+      return rateColorLUT[Math.round(t * 255)];
+    }
+
+    // 境界ポリゴン（市区町村レイヤー/住所コードの町レイヤー）の塗り色を決定する
+    // 配布率モード時は町丁目単位の推定配布率でコロプレス表示、それ以外は既定の黄色
+    function boundaryStyleFor(code) {
+      if (rateHeatmapVisible && boundaryFeatureCount > 0) {
+        const stat = townDeliveryStats[code];
+        const hasHouseholds = stat && stat.households > 0;
+        // 統計上世帯数が0（データなし）の町丁目は按分・実績との比較が成立しないため、
+        // ヒートマップ色を付けずグレーにする（黄色だと配布率50%前後に見えてしまうため）
+        return {
+          fillColor: hasHouseholds ? rateFillColor(stat.rate) : '#1a1a1a',
+          fillOpacity: cityFillOpacity, color: '#DBC900', weight: 1.5, opacity: 0.9,
+        };
+      }
+      return { fillColor: '#FFFBBB', fillOpacity: cityFillOpacity, color: '#DBC900', weight: 1.5, opacity: 0.9 };
+    }
+
+    function cityFeatureStyle(feature) {
+      return boundaryStyleFor(String(feature?.properties?.KEY_CODE || feature?.properties?.KEYCODE || '').trim());
+    }
+
+    // 表示中（トグルON）のGPX軌跡が1本でもあるか。境界ポリゴンの町字名ホバーとGPX軌跡ホバーが
+    // 競合しないよう、GPXが1本でも表示されていればGPX側の吹き出しを優先し、町字名側は出さない
+    function anyTrackVisible() {
+      return DEVICES.some(d => visibility[d.key]);
+    }
+
+    // 境界ポリゴンのホバー吹き出し用詳細テキスト（市区町村/住所コードの町の両方から使う共通ヘルパー）
+    function boundaryFeatureStatDetail(townCode) {
+      if (!rateHeatmapVisible) return '';
+      const stat = townDeliveryStats[townCode];
+      if (!stat) return '';
+      const hasHouseholds = stat.households > 0;
+      const visitsText = hasHouseholds ? `${stat.visits.toFixed(0)}軒` : '－';
+      const rateText = hasHouseholds ? `${stat.rate.toFixed(1)}%` : '－';
+      return `世帯数 ${stat.households.toFixed(0)}｜配布数 ${visitsText}｜充足率 ${rateText}`;
+    }
+
+    // 市区町村単位のGeoJSONレイヤーを構築する（市区町村トグルON時・セーブデータ復元時の両方から呼ばれる共通処理）。
+    // フィーチャ（ポリゴン）1枚ごとにmouseover/mousemove/mouseoutを貼ると、町丁目数が多い市区町村で
+    // イベント登録コスト・メモリが無視できなくなるため、L.geoJSON（FeatureGroup）はホバーイベントを
+    // 子レイヤーからグループへ自動で伝播する（e.layerに実際にホバーしたPathが入る）性質を使い、
+    // レイヤーグループ単位に1組だけリスナーを登録する（②のイベント一括化）
+    function buildCityGeoJSONLayer(features) {
+      const layer = L.geoJSON({ type: 'FeatureCollection', features }, {
+        style: cityFeatureStyle, pane: 'boundaryPane', renderer: boundaryCanvasRenderer,
+      });
+      const labelOf = p => [p.CITY_NAME, p.S_NAME].filter(Boolean).join(' ') || p.name || '';
+      layer.on('mouseover', e => {
+        const lyr = e.layer;
+        const p = lyr.feature?.properties || {};
+        const label = labelOf(p);
+        const townCode = String(p.KEY_CODE || p.KEYCODE || '').trim();
+        if (label && !anyTrackVisible()) {
+          _balloonLocked = true;
+          showBalloon(null, label, boundaryFeatureStatDetail(townCode), e.originalEvent.clientX, e.originalEvent.clientY, 'cursor', true);
+        }
+        lyr.setStyle({ fillOpacity: Math.min(1, cityFillOpacity + 0.25), weight: 2.5 });
+      });
+      layer.on('mousemove', e => {
+        const lyr = e.layer;
+        const p = lyr.feature?.properties || {};
+        const label = labelOf(p);
+        if (!label || anyTrackVisible()) return;
+        const townCode = String(p.KEY_CODE || p.KEYCODE || '').trim();
+        showBalloon(null, label, boundaryFeatureStatDetail(townCode), e.originalEvent.clientX, e.originalEvent.clientY, 'cursor', true);
+      });
+      layer.on('mouseout', e => {
+        const lyr = e.layer;
+        const p = lyr.feature?.properties || {};
+        if (labelOf(p)) hideBalloon();
+        layer.resetStyle(lyr);
+      });
+      return layer;
+    }
+
+    // 表示中の境界レイヤー（市区町村/住所コードの町）の色を現在のモード・集計結果で再適用する
+    function applyBoundaryColorStyle() {
+      Object.values(cityGroups).forEach(g => {
+        g.setStyle(f => boundaryStyleFor(String(f?.properties?.KEY_CODE || f?.properties?.KEYCODE || '').trim()));
+      });
+      Object.entries(townLayers).forEach(([code, g]) => {
+        g.setStyle(() => boundaryStyleFor(code));
+      });
+    }
+
+    // ----- 立ち寄りクラスタの検出とポイント・イン・ポリゴン集計（メッシュを介さず町丁目ポリゴンへ直接判定する） -----
+    // GPX読み込み・境界データ読み込み・CSV読み込み・スライダー確定など、集計に影響する操作のたびに呼ばれる。
+    // turf.intersectのような重いジオメトリ演算が無いため、進捗バーや中断制御なしで同期的に完了する。
+    async function computeVisitEstimates() {
+      townVisitUnits = {};
+
+      if (townSpatialIdx) {
+        const radiusKm = clusterRadiusM / 1000;
+        let processed = 0;
+        for (const key in GPX_DATA) {
+          const coords = GPX_DATA[key];
+          if (!coords || !coords.length) continue;
+          const clusters = computeVisitClusters(coords, radiusKm);
+          for (const c of clusters) {
+            const dwellSec = Math.max(0, c.dwellMs / 1000);
+            const units = Math.max(1, Math.round(dwellSec / secPerUnit)); // 滞在時間を軸数に換算（マンション等の複数軒配達を反映）
+            const code = findTownCodeAt(c.lat, c.lon);
+            if (code) {
+              townVisitUnits[code] = (townVisitUnits[code] || 0) + units * DISTRIBUTION_ESTIMATE_FACTOR;
+            }
+          }
+          processed++;
+          if (processed % 3 === 0) await yieldToUI();
+        }
+      }
+
+      await aggregateTownStats();
+    }
+
+    // ----- 集計（軽量な数値集計。townVisitUnits×世帯数/配布数(実績)から再計算） -----
+    // 住所コード（CSV）モード: townDeliveryStatsはtown.codeキーのまま住所コード欄のリストに表示
+    // 境界設定モード: 町丁目単位の結果をcityKeyByTownCodeで市区町村単位へロールアップして境界設定欄のリストに表示
+    async function aggregateTownStats() {
+      const stats = {};
+      if (boundaryFeatureCount > 0) {
+        if (csvMode) {
+          // CSVの各行が指すKEY_CODEをmatchCodeで解決する（applyCSVFilterの描画対象選定と同じく最初に一致した1件のみを採用）
+          // 町丁目数×境界フィーチャ数のマッチングは件数が多いと重くなるため、定期的にUIへ制御を戻す
+          let processed = 0;
+          for (const town of csvTowns) {
+            let matchedCode = null;
+            for (const code of Object.keys(allFeaturesByCode)) {
+              if (matchCode(town.code, code)) { matchedCode = code; break; }
+            }
+            if (matchedCode !== null) {
+              const visits = Math.round(townVisitUnits[matchedCode] || 0);
+              const distCount = town.distributionCount || 0;
+              // 統計上世帯数は住所コードデータの列ではなく、境界shapefileのSETAIプロパティから取得する
+              // （住所コードデータに世帯数の列が無くても表示できるようにするため）
+              const households = townSetaiByCode[matchedCode] || 0;
+              // ユーザー合意事項: 配布率は100%でキャップせず実数のまま保持・表示する
+              // CSVの配布数（実績）が無い場合は世帯数按分による割合にフォールバックする
+              const rate = distCount > 0
+                ? (visits / distCount) * 100
+                : (households > 0 ? (visits / households) * 100 : 0);
+              stats[town.code] = { households, visits, rate };
+            }
+            processed++;
+            if (processed % 10 === 0) await yieldToUI();
+          }
+        } else {
+          // 境界設定モード: KEY_CODEそのままの粒度（SETAIも同じ粒度で取得済み）
+          let processed = 0;
+          for (const code in cityKeyByTownCode) {
+            const visits = Math.round(townVisitUnits[code] || 0);
+            const households = townSetaiByCode[code] || 0;
+            if (visits !== 0 || households !== 0) {
+              const rate = households > 0 ? (visits / households) * 100 : 0;
+              stats[code] = { households, visits, rate };
+            }
+            processed++;
+            if (processed % 50 === 0) await yieldToUI();
+          }
+        }
+      }
+      townDeliveryStats = stats;
+
+      const cstats = {};
+      if (!csvMode) {
+        for (const code in stats) {
+          const cityKey = cityKeyByTownCode[code];
+          if (!cityKey) continue;
+          if (!cstats[cityKey]) cstats[cityKey] = { households: 0, visits: 0 };
+          cstats[cityKey].households += stats[code].households;
+          cstats[cityKey].visits += stats[code].visits;
+        }
+        for (const key in cstats) {
+          cstats[key].visits = Math.round(cstats[key].visits);
+          cstats[key].rate = cstats[key].households > 0
+            ? (cstats[key].visits / cstats[key].households) * 100
+            : 0;
+        }
+      }
+      cityDeliveryStats = cstats;
+
+      // 集計結果が無ければ推定配布率ヒートマップのボタンを隠し、表示中なら自動でOFFにする
+      // （statsはGPS実績が0でも住所コード・境界データが一致しただけで作られるため、
+      // 　「実際にGPSから推定訪問数が算出できたか」を示すtownVisitUnitsの有無で判定する）
+      const hasRateData = Object.keys(townVisitUnits).length > 0;
+      const rateBtn = document.getElementById('rateHeatmapToggleBtn');
+      if (rateBtn) {
+        rateBtn.style.display = hasRateData ? '' : 'none';
+        if (!hasRateData && rateHeatmapVisible) rateBtn.classList.remove('active');
+      }
+      // 集計結果が初めて得られたときだけ自動的にヒートマップをONにする（以降はユーザーの手動操作を尊重する）
+      if (hasRateData && !rateAutoShown) {
+        rateHeatmapVisible = true;
+        rateAutoShown = true;
+        if (rateBtn) rateBtn.classList.add('active');
+      }
+      if (!hasRateData) { rateHeatmapVisible = false; rateAutoShown = false; }
+
+      applyBoundaryColorStyle();
+      if (csvMode) updateTownList(); else if (boundaryLevel === 'pref') renderPrefStage(); else updateCityList();
+    }
+
+    // ===== CSVレポート =====
+
+    function parseCSVLine(line) {
+      const cols = [];
+      let inQuote = false, cur = '';
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') { inQuote = !inQuote; }
+        else if (ch === ',' && !inQuote) { cols.push(cur); cur = ''; }
+        else { cur += ch; }
+      }
+      cols.push(cur);
+      return cols;
+    }
+
+    function matchCode(csvCode, keyCode) {
+      csvCode = String(csvCode).trim();
+      keyCode = String(keyCode || '').trim();
+      if (!csvCode || !keyCode) return false;
+      if (csvCode === keyCode) return true;
+      if (keyCode.startsWith(csvCode)) return true;
+      if (csvCode.length >= 5 && keyCode.length >= 5 &&
+        csvCode.slice(0, 5) === keyCode.slice(0, 5)) {
+        return parseInt(csvCode.slice(5), 10) === parseInt(keyCode.slice(5), 10);
+      }
+      return false;
+    }
+
+    // 「配布数」列は住所コード等の固定列（1〜5）と異なりCSVごとに位置が変わりうるため、
+    // ヘッダー名から自動判別できない場合はユーザーに列を選ばせる
+    const CSV_FIXED_COL_INDEXES = [1, 2, 3, 4, 5]; // code, prefName, cityName, townName, (旧統計上世帯数列、現在は境界データのSETAIを参照するため未使用)
+    const CSV_PICK_CANCELLED = Symbol('csv-pick-cancelled');
+
+    function autoDetectDistributionColIdx(headerCols) {
+      // 列名が完全に「配布数」と一致する列があれば最優先で採用する
+      for (let idx = 0; idx < headerCols.length; idx++) {
+        if (CSV_FIXED_COL_INDEXES.includes(idx)) continue;
+        if ((headerCols[idx] || '').trim() === '配布数') return idx;
+      }
+      const candidates = [];
+      headerCols.forEach((h, idx) => {
+        if (CSV_FIXED_COL_INDEXES.includes(idx)) return;
+        const name = (h || '').trim();
+        if (name && name.includes('配布') && !name.includes('率')) candidates.push(idx);
+      });
+      return candidates.length === 1 ? candidates[0] : -1;
+    }
+
+    // 配布数列をユーザーに選択させるモーダルを表示し、選択された列インデックスを返す
+    // （キャンセル時はCSV_PICK_CANCELLEDをthrow）
+    function pickDistributionColumn(headerCols, sampleCols) {
+      return new Promise((resolve, reject) => {
+        const modal = document.getElementById('colPickModal');
+        const list = document.getElementById('colPickList');
+        const cancelBtn = document.getElementById('colPickCancelBtn');
+        list.innerHTML = '';
+
+        headerCols.forEach((h, idx) => {
+          if (CSV_FIXED_COL_INDEXES.includes(idx)) return;
+          const name = (h || '').trim();
+          const sample = (sampleCols[idx] || '').trim();
+          if (!name && !sample) return;
+          const row = document.createElement('div');
+          row.className = 'cp-row';
+          row.innerHTML =
+            `<span class="cp-idx">${idx + 1}</span>` +
+            `<span class="cp-head">${name || '(無題)'}</span>` +
+            `<span class="cp-sample">${sample}</span>`;
+          row.addEventListener('click', () => { cleanup(); resolve(idx); });
+          list.appendChild(row);
+        });
+
+        const noneRow = document.createElement('div');
+        noneRow.className = 'cp-row cp-none';
+        noneRow.textContent = '配布数の列は無い（0件として扱う）';
+        noneRow.addEventListener('click', () => { cleanup(); resolve(-1); });
+        list.appendChild(noneRow);
+
+        function onCancel() { cleanup(); reject(CSV_PICK_CANCELLED); }
+        function cleanup() {
+          modal.classList.remove('show');
+          cancelBtn.removeEventListener('click', onCancel);
+        }
+        cancelBtn.addEventListener('click', onCancel);
+        modal.classList.add('show');
+      });
+    }
+
+    async function loadCSVReport(file) {
+      const btn = document.getElementById('csvReportBtn');
+      btn.style.pointerEvents = 'none';
+      btn.textContent = '⏳ 読み込み中...';
+      btn.classList.remove('active');
+
+      // この関数内で住所コードに紐づく境界データを自動fetchし終えるまでの間、
+      // ✕ボタンで途中解除されると自動fetchの結果が解除後に遅れて反映される競合状態になるため、
+      // 処理完了までは✕ボタンを操作不可にする
+      const csvClearBtn = document.getElementById('csvReportClearBtn');
+      csvClearBtn.style.pointerEvents = 'none';
+
+      try {
+        const buf = await file.arrayBuffer();
+        const text = decodeBytesAuto(new Uint8Array(buf));
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (lines.length < 2) throw new Error('データが見つかりません');
+
+        const headerCols = parseCSVLine(lines[0]);
+        const firstDataCols = parseCSVLine(lines[1]);
+        let distColIdx = autoDetectDistributionColIdx(headerCols);
+        if (distColIdx === -1 && headerCols.length > CSV_FIXED_COL_INDEXES.length + 1) {
+          // 自動判別できず、かつ配布数らしき候補列が存在しうる場合のみ選択を求める
+          try {
+            distColIdx = await pickDistributionColumn(headerCols, firstDataCols);
+          } catch (e) {
+            if (e === CSV_PICK_CANCELLED) { btn.textContent = '📊 住所コード読み込み'; return; }
+            throw e;
+          }
+        }
+
+        // 追加読み込み時は既存の町丁目コードと重複する行を無視し、csvTownsに合流させる
+        const existingCodes = new Set(csvTowns.map(t => t.code));
+        const newTowns = [];
+        const seenCodes = new Set();
+        for (let i = 1; i < lines.length; i++) {
+          const cols = parseCSVLine(lines[i]);
+          const code = (cols[1] || '').trim();
+          const prefName = (cols[2] || '').trim();
+          const cityName = (cols[3] || '').trim();
+          const townName = (cols[4] || '').trim();
+          const distributionCount = distColIdx >= 0 ? (parseInt((cols[distColIdx] || '').replace(/,/g, ''), 10) || 0) : 0;
+          if (code && /^\d+$/.test(code) && !seenCodes.has(code) && !existingCodes.has(code)) {
+            seenCodes.add(code);
+            newTowns.push({ code, prefName, cityName, townName, distributionCount });
+          }
+        }
+        if (!newTowns.length && !csvTowns.length) throw new Error('有効な住所コードが見つかりません');
+
+        if (!csvMode) {
+          // 初回読み込み時のみ既存の町丁目/市区町村レイヤーをクリアする（追加読み込み時は残す）
+          Object.values(townLayers).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
+          Object.values(cityGroups).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
+          townLayers = {};
+        }
+
+        csvTowns = csvTowns.concat(newTowns);
+        csvMode = true;
+        townFilterText = '';
+        newTowns.forEach(t => { townVisibility[t.code] = true; });
+
+        // UIをCSVモードに切り替え（ヘッダーの列構成はupdateTownList内で組み立てる）
+        document.getElementById('boundarySectionTitle').textContent = '住所コード';
+        document.getElementById('cityFilterInput').placeholder = '町丁目名で絞り込み';
+        document.getElementById('cityFilterInput').value = '';
+        boundaryLevel = 'town';
+        townStageFromCSV = true;
+
+        // 住所コードから都道府県コードを判定し、県内全市区町村のジオメトリが未取得なら自動取得する
+        // （ユーザーが先に境界データを読み込んでおく必要をなくす。confirm確認は自動処理では出さない。
+        // 一覧だけ読み込み済み・一部市区町村だけトグルON済みの県も対象に含める必要があるため、
+        // loadedPrefCodesではなくfullyFetchedPrefCodesで判定する）
+        const neededPrefCodes = [...new Set(newTowns.map(t => t.code.slice(0, 2)))]
+          .filter(c => /^\d{2}$/.test(c) && !fullyFetchedPrefCodes.has(c));
+        for (const prefCode of neededPrefCodes) {
+          await loadPrefectureByCode(prefCode, { auto: true });
+        }
+
+        if (Object.keys(allFeaturesByCode).length > 0) {
+          applyCSVFilter();
+        } else {
+          updateTownList();
+        }
+
+        document.getElementById('csvReportGroup').classList.add('loaded');
+        btn.textContent = '📊 住所コード読み込み';
+        btn.classList.add('active');
+        updateBoundaryStepper();
+
+        // 対象範囲が実際に増えた場合のみ再集計する
+        // （同じCSVを重複読込した場合など、新規追加が無ければ無駄な再計算をスキップする）
+        if (newTowns.length) {
+          computeVisitEstimates();
+        }
+      } catch (e) {
+        console.error(e);
+        alert(`CSVの読み込みに失敗しました。\n${e.message}`);
+        btn.textContent = '📊 住所コード読み込み';
+      } finally {
+        btn.style.pointerEvents = '';
+        csvClearBtn.style.pointerEvents = '';
+      }
+    }
+
+    async function clearCSVReport() {
+      if (!confirm('住所コードの読み込みをキャンセルしますか？')) return;
+
+      teardownTownStage();
+      if (Object.keys(cityNames).length > 0) {
+        await enterCityStage();
+      } else {
+        enterPrefStage();
+      }
+
+      // 住所コード解除で集計の対象範囲(粒度)が変わるため再集計する
+      computeVisitEstimates();
+    }
+
+    // csvMode中に都道府県を複数取得すると、都道府県ごとにこの関数が呼ばれるため
+    // await無しで多重に(重複して)実行されることがある。世代カウンタで「後から呼ばれた
+    // 実行だけが最後まで走る」ようにし、古い実行は自分がaddToMapしたレイヤーがtownLayers
+    // から見えなくなる（＝解除不能な迷子レイヤーになる）前に自ら中断する。
+    let csvFilterGeneration = 0;
+    // 既にtownLayersにある町丁目はここでは触らない（表示状態を保ったまま、追加読込で増えた
+    // 新規の町丁目分だけレイヤーを組み立てる）。CSV読込のやり直し等で完全に作り直したい場合は
+    // 呼び出し側（teardownTownStage等）がtownLayersを空にしてから呼ぶこと。
+    async function applyCSVFilter() {
+      const myGen = ++csvFilterGeneration;
+
+      // あいまい一致（桁のずれ吸収）が必要な場合だけのフォールバック用。ループの外で1回だけ作る
+      // （町丁目ごとに全件を作り直すと件数の掛け算で著しく遅くなるため）
+      const allEntries = Object.entries(allFeaturesByCode);
+
+      let processed = 0;
+      for (const town of csvTowns) {
+        if (myGen !== csvFilterGeneration) return; // 新しい呼び出しに引き継がれたため中断
+        if (townLayers[town.code]) continue; // 構築済みの町丁目は表示状態を保ったまま維持する
+
+        // 住所コードは境界データのKEY_CODEとほぼ完全一致するため、まず直接引き（O(1)）を試す。
+        // 見つからない場合のみ、桁のずれ等を吸収するあいまい一致に総当たりでフォールバックする
+        let matched = allFeaturesByCode[town.code];
+        if (!matched) {
+          matched = [];
+          for (const [code, features] of allEntries) {
+            if (matchCode(town.code, code)) { matched = features; break; }
+          }
+        }
+        if (!matched.length) continue;
+
+        // buildCityGeoJSONLayerと同様、フィーチャ単位ではなくレイヤーグループ単位でホバーイベントを
+        // 受ける（②のイベント一括化。1町丁目あたりのフィーチャ数は通常少ないが、統一しておく）
+        const townStyle = () => boundaryStyleFor(town.code);
+        const layer = L.geoJSON({ type: 'FeatureCollection', features: matched }, {
+          style: townStyle, pane: 'boundaryPane', renderer: boundaryCanvasRenderer,
+        });
+        const labelOf = p => [p.CITY_NAME, p.S_NAME].filter(Boolean).join(' ') || p.name || town.townName || '';
+        layer.on('mouseover', e => {
+          const lyr = e.layer;
+          const label = labelOf(lyr.feature?.properties || {});
+          if (label && !anyTrackVisible()) {
+            _balloonLocked = true;
+            showBalloon(null, label, boundaryFeatureStatDetail(town.code), e.originalEvent.clientX, e.originalEvent.clientY, 'cursor', true);
+          }
+          lyr.setStyle({ fillOpacity: Math.min(1, cityFillOpacity + 0.25), weight: 2.5 });
+        });
+        layer.on('mousemove', e => {
+          const lyr = e.layer;
+          const label = labelOf(lyr.feature?.properties || {});
+          if (!label || anyTrackVisible()) return;
+          showBalloon(null, label, boundaryFeatureStatDetail(town.code), e.originalEvent.clientX, e.originalEvent.clientY, 'cursor', true);
+        });
+        layer.on('mouseout', e => {
+          const lyr = e.layer;
+          if (labelOf(lyr.feature?.properties || {})) hideBalloon();
+          layer.resetStyle(lyr);
+        });
+        townLayers[town.code] = layer;
+        if (townVisibility[town.code]) layer.addTo(map);
+
+        processed++;
+        if (processed % 5 === 0) await yieldToUI();
+      }
+
+      if (myGen !== csvFilterGeneration) return;
+      updateTownList();
+    }
+
+    function updateTownList() {
+      const hdr = document.getElementById('cityListHeader');
+      const el = document.getElementById('cityList');
+      el.innerHTML = '';
+
+      const showStats = boundaryFeatureCount > 0;
+      hdr.innerHTML =
+        '<div class="h-toggle"></div>' +
+        '<span class="h-name">町丁目名</span>' +
+        '<span class="h-stat">統計上<br>世帯数</span>' +
+        '<span class="h-stat">配布数<br>(実績)</span>' +
+        (showStats ? '<span class="h-stat">推定<br>配布数</span><span class="h-stat">充足<br>率</span>' : '');
+      hdr.style.display = 'flex';
+
+      if (Object.keys(allFeaturesByCode).length === 0) {
+        el.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--text-muted);text-align:center">境界データの自動取得に失敗しました。インターネット接続を確認してください</div>';
+        document.getElementById('cityCount').textContent = `${csvTowns.length}件`;
+        updateBoundaryStepper();
+        return;
+      }
+
+      const matchedCount = csvTowns.filter(t => townLayers[t.code]).length;
+      document.getElementById('cityCount').textContent = `${matchedCount}/${csvTowns.length}件`;
+
+      const q = townFilterText.toLowerCase().replace(/\s+/g, '');
+      const filtered = csvTowns.filter(t => townMatchesFilter(t, q));
+
+      if (showStats && Object.keys(townDeliveryStats).length) {
+        // 配布率の低い順（未計算・統計上世帯数0の町丁目は末尾）に並べ替える
+        filtered.sort((a, b) => {
+          const sa = townDeliveryStats[a.code], sb = townDeliveryStats[b.code];
+          const ra = (sa && sa.households > 0) ? sa.rate : null;
+          const rb = (sb && sb.households > 0) ? sb.rate : null;
+          if (ra == null && rb == null) return 0;
+          if (ra == null) return 1;
+          if (rb == null) return -1;
+          return ra - rb;
+        });
+      }
+
+      filtered.forEach(town => {
+        const hasLayer = !!townLayers[town.code];
+        const on = hasLayer && townVisibility[town.code];
+        const row = document.createElement('div');
+        row.className = 'city-row' + (!hasLayer ? ' grayed' : '');
+
+        const tog = document.createElement('div');
+        tog.className = 'city-toggle' + (on ? ' on' : '');
+        if (hasLayer) {
+          tog.addEventListener('click', e => { e.stopPropagation(); toggleTown(town.code, !townVisibility[town.code]); });
+        }
+
+        const nm = document.createElement('span');
+        nm.className = 'city-name';
+        nm.innerHTML = (town.cityName ? `<span style="font-size:9px;color:var(--text-muted);margin-right:3px">${town.cityName}</span>` : '')
+          + (town.townName || town.code);
+
+        const ms = townDeliveryStats[town.code];
+
+        const st = document.createElement('span');
+        st.className = 'city-stat';
+        st.title = '統計上世帯数（境界データのSETAIを参照）';
+        st.textContent = ms && ms.households > 0 ? ms.households.toLocaleString() : '—';
+
+        const dl = document.createElement('span');
+        dl.className = 'city-stat';
+        dl.title = '配布数（実績）';
+        dl.textContent = town.distributionCount > 0 ? town.distributionCount.toLocaleString() : '—';
+
+        row.appendChild(tog);
+        row.appendChild(nm);
+        row.appendChild(st);
+        row.appendChild(dl);
+
+        if (showStats) {
+          const hasHouseholds = ms && ms.households > 0;
+          const vs = document.createElement('span');
+          vs.className = 'city-stat';
+          vs.title = 'GPS滞在クラスタのポイント・イン・ポリゴン集計による推定配布数';
+          vs.textContent = hasHouseholds ? ms.visits.toLocaleString() : '—';
+
+          const rt = document.createElement('span');
+          rt.className = 'city-stat rate';
+          rt.title = 'GPS滞在クラスタのポイント・イン・ポリゴン集計による推定配布数の、配布数(実績)に対する割合';
+          rt.textContent = hasHouseholds ? ms.rate.toFixed(1) + '%' : '—';
+
+          row.appendChild(vs);
+          row.appendChild(rt);
+        }
+
+        if (hasLayer) row.addEventListener('click', () => toggleTown(town.code, !townVisibility[town.code]));
+        el.appendChild(row);
+      });
+
+      if (!el.children.length)
+        el.innerHTML = '<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">該当なし</div>';
+
+      updateBoundaryStepper();
+    }
+
+    function toggleTown(code, show) {
+      townVisibility[code] = show;
+      const g = townLayers[code];
+      if (!g) return;
+      if (show && !map.hasLayer(g)) {
+        g.addTo(map);
+        const b = g.getBounds();
+        if (b.isValid()) map.fitBounds(b, { padding: [40, 40], maxZoom: 17, animate: false });
+      }
+      else if (!show && map.hasLayer(g)) map.removeLayer(g);
+      updateTownList();
+    }
+
+    // 町丁目一覧の絞り込み条件（townFilterText）に一致するかどうかを判定する（bulkTownVisibilityと共用）
+    function townMatchesFilter(t, q) {
+      if (!q) return true;
+      const searchText = `${t.prefName}${t.cityName}${t.townName}`.toLowerCase().replace(/\s+/g, '');
+      return searchText.includes(q);
+    }
+
+    // 「全て表示/全て非表示」は、現在の絞り込み（townFilterText）に一致する行だけを対象にする
+    // （絞り込みで隠れている町丁目の表示状態は変えない）
+    function bulkTownVisibility(show) {
+      const q = townFilterText.toLowerCase().replace(/\s+/g, '');
+      csvTowns.forEach(town => {
+        if (!townMatchesFilter(town, q)) return;
+        townVisibility[town.code] = show;
+        const g = townLayers[town.code];
+        if (!g) return;
+        if (show && !map.hasLayer(g)) g.addTo(map);
+        else if (!show && map.hasLayer(g)) map.removeLayer(g);
+      });
+      updateTownList();
+    }
+
+    function onTownFilter(val) { townFilterText = val; updateTownList(); }
+
+    // ===== 情報吹き出し（自作div・全種類共通） =====
+    const HOVER_PX = 8;    // ヒット半径（ピクセル）
+    const MIN_ZOOM_HOVER = 13;  // このズーム未満は無効
+    const MAP_TOP_MARGIN = 30;  // 地図上端からこの範囲内はヘッダーと重なるため吹き出しを出さない
+
+    const hoverTip = document.getElementById('hover-tooltip');
+    const htLabel = hoverTip.querySelector('.ht-label');
+    const htTime = hoverTip.querySelector('.ht-time');
+    let _hoverRaf = null;
+    let _lastHoverE = null;
+    let _balloonLocked = false;    // マーカー/町丁目ホバー表示中はtrue（軌跡ホバーを抑止）
+
+    function fmtTime(ms) {
+      if (!ms) return '日時不明';
+      const d = new Date(ms);
+      const z = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}/${z(d.getMonth() + 1)}/${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+    }
+
+    function fmtDuration(ms) {
+      const totalMin = Math.round(ms / 60000);
+      const h = Math.floor(totalMin / 60), m = totalMin % 60;
+      if (h > 0) return m > 0 ? `${h}時間${m}分` : `${h}時間`;
+      return `${m}分`;
+    }
+
+    // idxの点に到達する直前の区間速度（無ければ次の区間で代用、両方無効なら null）
+    function nearestSpeed(key, idx) {
+      const speeds = GPX_SPEEDS[key];
+      if (!speeds) return null;
+      if (idx > 0 && speeds[idx - 1] >= 0) return speeds[idx - 1];
+      if (idx < speeds.length && speeds[idx] >= 0) return speeds[idx];
+      return null;
+    }
+
+    function fmtSpeed(kmh) {
+      return kmh == null ? '—' : `${kmh.toFixed(1)} km/h`;
+    }
+
+    // マーカーの地図座標をビューポート基準の画面座標に変換
+    function markerScreenPos(marker) {
+      const pt = map.latLngToContainerPoint(marker.getLatLng());
+      const rect = map.getContainer().getBoundingClientRect();
+      return { x: rect.left + pt.x, y: rect.top + pt.y };
+    }
+
+    // anchor: 'cursor'（カーソル右上）| 'top'（指定座標の真上中央）
+    function positionBalloon(x, y, anchor) {
+      hoverTip.style.visibility = 'hidden';
+      hoverTip.style.display = 'block';
+      const tw = hoverTip.offsetWidth, th = hoverTip.offsetHeight;
+      let nx, ny;
+      if (anchor === 'top') {
+        nx = x - tw / 2;
+        ny = y - th - 14;
+        if (ny < 6) ny = y + 14;
+      } else {
+        nx = x + 14;
+        ny = y - th - 8;
+        if (nx + tw > window.innerWidth) nx = x - tw - 14;
+        if (ny < 6) ny = y + 14;
+      }
+      nx = Math.max(4, Math.min(nx, window.innerWidth - tw - 4));
+      hoverTip.style.left = nx + 'px';
+      hoverTip.style.top = ny + 'px';
+      hoverTip.style.visibility = '';
+    }
+
+    // color: 端末色（nullなら無着色）, detailHtml: 2行目（空文字なら非表示）
+    // subtle: trueなら控えめな見た目にする（境界ポリゴンの町字名など、あくまで参考情報の表示用）
+    function showBalloon(color, label, detailHtml, x, y, anchor, subtle) {
+      // カーソルが地図上端付近にあると吹き出しがヘッダーに重なってしまうため表示しない
+      const mapTop = map.getContainer().getBoundingClientRect().top;
+      if (y - mapTop < MAP_TOP_MARGIN) { hoverTip.style.display = 'none'; return; }
+      hoverTip.classList.toggle('ht-subtle', !!subtle);
+      htLabel.style.color = color || '';
+      htLabel.textContent = label;
+      htTime.innerHTML = detailHtml || '';
+      htTime.style.display = detailHtml ? '' : 'none';
+      positionBalloon(x, y, anchor);
+    }
+
+    function hideBalloon() {
+      hoverTip.style.display = 'none';
+      _balloonLocked = false;
+    }
+
+    function doHoverSearch(e) {
+      if (_balloonLocked) return;
+      // 表示中のGPX軌跡が無ければ探すものが無いので何もしない（hideBalloon()を呼ぶと、
+      // 境界ポリゴン側が表示した町字名の吹き出しを毎フレーム消してしまう競合が起きるため）
+      if (!anyTrackVisible()) return;
+      if (map.getZoom() < MIN_ZOOM_HOVER) { hideBalloon(); return; }
+
+      const mp = e.containerPoint;
+      // 地図上端付近（ヘッダーと重なる範囲）は検索自体を省略する
+      if (mp.y < MAP_TOP_MARGIN) { hideBalloon(); return; }
+      const ll0 = map.containerPointToLatLng(mp);
+      const ll1 = map.containerPointToLatLng([mp.x + HOVER_PX, mp.y + HOVER_PX]);
+      const latTol = Math.abs(ll1.lat - ll0.lat);
+      const lonTol = Math.abs(ll1.lng - ll0.lng);
+      const mLat = ll0.lat, mLon = ll0.lng;
+
+      let best = null, bestDist = HOVER_PX + 1;
+
+      for (let di = 0; di < DEVICES.length; di++) {
+        const dev = DEVICES[di];
+        if (!visibility[dev.key]) continue;
+        const coords = GPX_DATA[dev.key];
+        if (!coords) continue;
+        for (let i = 0; i < coords.length; i++) {
+          const lat = coords[i][0], lon = coords[i][1];
+          // lat/lon バウンディングボックスで大半を除外（高速）
+          if (lat < mLat - latTol || lat > mLat + latTol) continue;
+          if (lon < mLon - lonTol || lon > mLon + lonTol) continue;
+          // 通過した点のみピクセル距離を計算
+          const px = map.latLngToContainerPoint([lat, lon]);
+          const dist = Math.hypot(px.x - mp.x, px.y - mp.y);
+          if (dist < bestDist) { bestDist = dist; best = { dev, time: coords[i][2], idx: i, coords }; }
+        }
+      }
+
+      if (best) {
+        const oe = e.originalEvent;
+        const label = best.dev.rawLabel || (best.dev.company ? `${best.dev.company} ${best.dev.model}` : best.dev.model);
+        // 間引き表示中（サンプリングレート>1）は2点間の実距離が不明瞭になり速度の信頼性が低いため非表示
+        const showSpeed = getSampleRate(map.getZoom()) === 1;
+        const detail = showSpeed
+          ? `${fmtTime(best.time)}<br>${fmtSpeed(nearestSpeed(best.dev.key, best.idx))}`
+          : fmtTime(best.time);
+        showBalloon(best.dev.color, label, detail, oe.clientX, oe.clientY, 'cursor');
+      } else {
+        hideBalloon();
+      }
+    }
+
+    map.on('mousemove', e => {
+      _lastHoverE = e;
+      if (_hoverRaf) return;
+      _hoverRaf = requestAnimationFrame(() => { _hoverRaf = null; doHoverSearch(_lastHoverE); });
+    });
+    map.on('mouseout', hideBalloon);
+    map.on('dragstart', hideBalloon);
+    map.on('zoomstart', hideBalloon);
+
+    // NominatimのaddressDetails(a)・display_nameから都道府県・市区町村名を抽出する共通処理。
+    // 政令指定都市の区はaddress.suburbに入る（東京23区はaddress.cityに入るため対象外）
+    function extractPrefAndCityFromAddress(a, displayName) {
+      let pref = '';
+      if (a.state && /[都道府県]$/.test(a.state)) {
+        pref = a.state;
+      } else if (a.province && /[都道府県]$/.test(a.province)) {
+        pref = a.province;
+      } else {
+        const dnParts = (displayName || '').split(',').map(s => s.trim());
+        pref = dnParts.find(s => /[都道府県]$/.test(s)) || a.state || a.province || '';
+      }
+      const ward = (a.suburb && /区$/.test(a.suburb)) ? a.suburb : '';
+      const cityArr = [a.city, a.city_district, a.county, a.town, a.village, ward]
+        .filter(s => s && s !== pref && !/[都道府県]$/.test(s));
+      const city = [...new Set(cityArr)].join('');
+      return { pref, city, ward };
+    }
+
+    // ===== クリック位置の住所表示 =====
+    // 都道府県・市区町村 → Nominatim、町丁目 → 国土地理院
+    let _geoAbort = null;
+    map.on('click', async e => {
+      const disp = document.getElementById('locationDisplay');
+      disp.textContent = '取得中…';
+      if (_geoAbort) _geoAbort.abort();
+      const ctrl = new AbortController();
+      _geoAbort = ctrl;
+      const { lat, lng } = e.latlng;
+      try {
+        const [nomRes, gsiRes] = await Promise.all([
+          fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=ja`, { signal: ctrl.signal }),
+          fetch(`https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress?lat=${lat}&lon=${lng}`, { signal: ctrl.signal }),
+        ]);
+        const [nomJson, gsiJson] = await Promise.all([nomRes.json(), gsiRes.json()]);
+
+        const a = nomJson.address || {};
+        const { pref, city, ward } = extractPrefAndCityFromAddress(a, nomJson.display_name);
+        const town = gsiJson?.results?.lv01Nm || a.quarter || (ward ? '' : a.suburb) || a.neighbourhood || '';
+
+        const parts = [pref, city, town].filter(Boolean);
+        disp.textContent = parts.length ? parts.join('　') : '—';
+      } catch (err) {
+        if (err.name !== 'AbortError') disp.textContent = '—';
+      }
+    });
+
+    // 検索語(rawQuery)とジオコーディングで得た市区町村名(geocodedCity)から、
+    // 表示すべき市区町村（cityNamesのキー）を1件以上解決する。政令指定都市の扱いが肝:
+    //   「横浜市港北区」のように区名まで入力された場合    → その区のみ
+    //   「横浜市」のように親市名だけ入力された場合        → 全区をまとめて対象にする
+    //   「町田市」のような区を持たない市区町村名の場合    → その市区町村のみ
+    //   「横浜市港北区新横浜」のような町丁目まで含む入力  → ジオコーディング結果の市区町村名で解決
+    function resolveCityKeysForQuery(rawQuery, geocodedCity) {
+      const q = (rawQuery || '').trim();
+      if (!q) return [];
+
+      // 入力そのものが「〇〇市××区」形式なら、その区だけを厳密一致で探す
+      if (designatedCityParent(q)) {
+        const key = Object.keys(cityNames).find(k => cityNames[k] === q);
+        return key ? [key] : [];
+      }
+      // 政令指定都市の親市名だけが入力された場合は、その市の全区を対象にする
+      const wardKeys = Object.keys(cityNames).filter(k => designatedCityParent(cityNames[k]) === q);
+      if (wardKeys.length) return wardKeys;
+      // 通常の市区町村名として厳密一致
+      const exact = Object.keys(cityNames).find(k => cityNames[k] === q);
+      if (exact) return [exact];
+      // ここまでで見つからなければ、より詳細な住所（町丁目等）とみなし、
+      // ジオコーディングで得られた市区町村名で厳密一致→部分一致の順に探す
+      if (geocodedCity) {
+        const exact2 = Object.keys(cityNames).find(k => cityNames[k] === geocodedCity);
+        if (exact2) return [exact2];
+        const partial = Object.keys(cityNames).find(k =>
+          cityNames[k].includes(geocodedCity) || geocodedCity.includes(cityNames[k]));
+        if (partial) return [partial];
+      }
+      return [];
+    }
+
+    // 住所検索で得られた都道府県・市区町村から、該当県の境界データを（未読込なら）裏側で静かに取得し、
+    // 該当する市区町村を市区町村一覧に「非表示」の状態で表示する（地図には自動描画しない）。
+    // 住所コード（CSV）表示中は市区町村一覧側を差し替えないため、データの取得のみ行う。
+    async function loadBoundaryForSearchQuery(rawQuery, nomResult) {
+      try {
+        const a = nomResult?.address || {};
+        const { pref, city: geocodedCity } = extractPrefAndCityFromAddress(a, nomResult?.display_name);
+        const prefCode = PREF_CODE_BY_NAME[pref];
+        if (!prefCode) return;
+
+        if (!loadedPrefCodes.has(prefCode)) {
+          await loadPrefectureByCode(prefCode, { silent: true });
+        }
+
+        const keys = resolveCityKeysForQuery(rawQuery, geocodedCity);
+        if (!keys.length) { console.warn('検索語に一致する市区町村の境界データが見つかりませんでした:', rawQuery); return; }
+
+        if (csvMode) {
+          console.warn('住所コード表示中のため、取得した境界データは市区町村一覧に反映していません（データ自体は読み込み済みです）');
+          return;
+        }
+
+        const filterLabel = keys.length > 1 ? rawQuery.trim() : cityNames[keys[0]];
+        cityFilterText = filterLabel;
+        document.getElementById('cityFilterInput').value = filterLabel;
+        document.getElementById('cityFilterInput').placeholder = '市区町村で絞り込み';
+        document.getElementById('boundarySectionTitle').textContent = '境界設定（市区町村）';
+        boundaryLevel = 'city';
+        await showCityLayersPerVisibility();
+        updateCityList();
+      } catch (e) {
+        console.error('検索語からの境界データ自動読込に失敗しました:', e);
+      }
+    }
+
+    // ===== 住所検索 =====
+    async function doAddressSearch() {
+      const q = document.getElementById('searchInput').value.trim();
+      if (!q) return;
+      const btn = document.getElementById('searchBtn');
+      btn.textContent = '⏳';
+      btn.style.pointerEvents = 'none';
+      try {
+        const isPostal = /^[\d\-]+$/.test(q);
+        let searchQuery = q;
+        if (isPostal) {
+          const zipcode = q.replace(/-/g, '');
+          const zipRes = await fetch(`https://zipcloud.ibsnet.co.jp/api/search?zipcode=${encodeURIComponent(zipcode)}`);
+          const zipJson = await zipRes.json();
+          if (!zipJson.results?.length) { alert('該当する郵便番号が見つかりませんでした。'); return; }
+          const r = zipJson.results[0];
+          searchQuery = [r.address1, r.address2, r.address3].filter(Boolean).join('');
+        }
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&accept-language=ja&limit=1&countrycodes=jp&addressdetails=1`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (!json.length) { alert('該当する住所が見つかりませんでした。'); return; }
+        const { lat, lon, boundingbox } = json[0];
+        if (boundingbox) {
+          const bounds = L.latLngBounds(
+            [+boundingbox[0], +boundingbox[2]],
+            [+boundingbox[1], +boundingbox[3]]
+          );
+          // 都道府県・市区町村など広い行政区域はboundingboxも広くなるため、
+          // その場合は自然なフィットズームをそのまま使う（下限16でクランプしない）。
+          // 個別の住所・建物等の狭いboundingboxは、従来通り16〜17（street level）にクランプする
+          const fitZoom = map.getBoundsZoom(bounds);
+          const zoom = fitZoom <= 15 ? fitZoom : Math.min(17, Math.max(16, fitZoom));
+          map.setView([+lat, +lon], zoom, { animate: false });
+        } else {
+          map.setView([+lat, +lon], 17, { animate: false });
+        }
+        await loadBoundaryForSearchQuery(searchQuery, json[0]);
+      } catch (e) {
+        alert('検索に失敗しました。');
+      } finally {
+        btn.textContent = '🔍';
+        btn.style.pointerEvents = '';
+      }
+    }
+    document.getElementById('searchInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doAddressSearch();
+    });
+    document.getElementById('searchClear').addEventListener('click', () => {
+      document.getElementById('searchInput').value = '';
+      document.getElementById('searchInput').focus();
+    });
+    document.getElementById('searchBtn').addEventListener('click', doAddressSearch);
+
+    document.getElementById('locationDisplay').addEventListener('click', function () {
+      const text = this.textContent;
+      if (!text || text === '—' || text === '取得中…') return;
+      navigator.clipboard.writeText(text).then(() => {
+        this.classList.add('copied');
+        setTimeout(() => this.classList.remove('copied'), 100);
+      });
+    });
+
+    // ===== ヘッダー下段（メッシュ関連ボタン）の表示/非表示切り替え =====
+    // ボタン・入力・検索欄・住所表示欄以外をクリックした場合のみ切り替える
+    document.getElementById('header').addEventListener('click', e => {
+      if (e.target.closest('button, label, input, #searchBox, #locationDisplay')) return;
+      document.getElementById('header').classList.toggle('expanded');
+      map.invalidateSize();
+    });
+
+    // ===== 初期描画 =====
+    updateSidebar();
+    setTimeout(() => document.getElementById('loading').classList.add('hide'), 500);
+
+    // ===== サイドバー 左右リサイズ =====
+    (function () {
+      const resizer = document.getElementById('sidebar-resizer');
+      let startX, startW;
+      resizer.addEventListener('mousedown', e => {
+        startX = e.clientX;
+        startW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 400;
+        resizer.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        function onMove(e) {
+          const w = Math.max(180, Math.min(700, startW + (e.clientX - startX)));
+          document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+          map.invalidateSize();
+        }
+        function onUp() {
+          resizer.classList.remove('dragging');
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+        }
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        e.preventDefault();
+      });
+    })();
+
+    // ===== 市区町村ペイン 上下リサイズ =====
+    (function () {
+      const resizer = document.getElementById('city-resizer');
+      let startY, startH;
+      resizer.addEventListener('mousedown', e => {
+        startY = e.clientY;
+        startH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--city-pane-h')) || 320;
+        resizer.classList.add('dragging');
+        document.body.style.cursor = 'row-resize';
+        document.body.style.userSelect = 'none';
+        function onMove(e) {
+          const h = Math.max(60, Math.min(800, startH - (e.clientY - startY)));
+          document.documentElement.style.setProperty('--city-pane-h', h + 'px');
+        }
+        function onUp() {
+          resizer.classList.remove('dragging');
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+        }
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        e.preventDefault();
+      });
+    })();
+
+    // ===== セーブ/ロード機能 =====
+    // 保存先はブラウザのIndexedDB（GitHub Pagesのリポジトリ容量は一切消費しない）。
+    // URLの utm_source パラメータで名前空間を分け、異なるパラメータで開いた場合は互いのセーブデータが見えない。
+    // 境界・住所コードデータ（重いポリゴン形状）はセーブごとに複製せず、内容が同一なら
+    // 名前空間内で1つだけ共有キャッシュ(geoCache)として持ち、各セーブスロットはそこへの参照のみ持つ。
+
+    const SAVE_DB_NAME = 'gpsTrackerSaves';
+    const SAVE_DB_VERSION = 1;
+
+    function getSaveNamespace() {
+      return new URLSearchParams(location.search).get('utm_source') || 'default';
+    }
+
+    function openSaveDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(SAVE_DB_NAME, SAVE_DB_VERSION);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('slots')) {
+            const store = db.createObjectStore('slots', { keyPath: 'id' });
+            store.createIndex('namespace', 'namespace', { unique: false });
+          }
+          if (!db.objectStoreNames.contains('geoCache')) {
+            db.createObjectStore('geoCache', { keyPath: 'fingerprint' });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function idbReq(req) {
+      return new Promise((resolve, reject) => {
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function idbPut(storeName, value) {
+      const db = await openSaveDB();
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).put(value);
+      return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function idbGet(storeName, key) {
+      const db = await openSaveDB();
+      const tx = db.transaction(storeName, 'readonly');
+      return idbReq(tx.objectStore(storeName).get(key));
+    }
+
+    async function idbDelete(storeName, key) {
+      const db = await openSaveDB();
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).delete(key);
+      return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    async function idbGetAllByIndex(storeName, indexName, key) {
+      const db = await openSaveDB();
+      const tx = db.transaction(storeName, 'readonly');
+      return idbReq(tx.objectStore(storeName).index(indexName).getAll(key));
+    }
+
+    async function idbGetAllKeys(storeName) {
+      const db = await openSaveDB();
+      const tx = db.transaction(storeName, 'readonly');
+      return idbReq(tx.objectStore(storeName).getAllKeys());
+    }
+
+    async function idbGetAll(storeName) {
+      const db = await openSaveDB();
+      const tx = db.transaction(storeName, 'readonly');
+      return idbReq(tx.objectStore(storeName).getAll());
+    }
+
+    // cyrb53系の高速ハッシュ。共有キャッシュの内容フィンガープリント用（暗号強度は不要）
+    function hashString(str) {
+      let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+      for (let i = 0; i < str.length; i++) {
+        const ch = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
+      }
+      h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+      h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+      return (h1 >>> 0).toString(16).padStart(8, '0') + (h2 >>> 0).toString(16).padStart(8, '0');
+    }
+
+    // 文字列 → gzip圧縮Blob（ブラウザネイティブのCompressionStreamを使用、追加ライブラリ不要）
+    async function gzipString(str) {
+      const bytes = new TextEncoder().encode(str);
+      const cs = new CompressionStream('gzip');
+      const writer = cs.writable.getWriter();
+      const writeDone = writer.write(bytes).then(() => writer.close());
+      const [buf] = await Promise.all([new Response(cs.readable).arrayBuffer(), writeDone]);
+      return new Blob([buf]);
+    }
+
+    async function gunzipToString(blob) {
+      const ds = new DecompressionStream('gzip');
+      return new Response(blob.stream().pipeThrough(ds)).text();
+    }
+
+    function slotId(namespace, name) { return `${namespace}::${name}`; }
+
+    // 境界/住所コードデータの現在の内容をフィンガープリント化し、共有キャッシュに未登録なら登録する。
+    // 同じ内容（同じ都道府県・同じ住所コードCSV）を指す限り、複数のセーブスロットが同じキャッシュ実体を共有する。
+    async function computeGeoCacheEntry() {
+      // 境界データ未読み込みでも住所コードCSVだけ読み込んでいる場合があるため、両方が空の時だけスキップする
+      if (Object.keys(allFeaturesByCode).length === 0 && csvTowns.length === 0) return null;
+      const content = {
+        allFeaturesByCode, cityKeyByTownCode, townSetaiByCode,
+        cityNames, cityCodes, cityPrefCodes, citySetai,
+        loadedPrefCodesArr: [...loadedPrefCodes],
+        autoPrefCodesArr: [...autoPrefCodes],
+        boundaryFeatureCount, csvTowns,
+      };
+      const json = JSON.stringify(content);
+      const fingerprint = hashString(json);
+      const existing = await idbGet('geoCache', fingerprint);
+      if (!existing) {
+        const blob = await gzipString(json);
+        await idbPut('geoCache', { fingerprint, blob, createdAt: Date.now() });
+      }
+      return fingerprint;
+    }
+
+    // どのセーブスロットからも参照されなくなった共有キャッシュを削除する（保存/削除のたびに非同期で実行）
+    async function pruneUnreferencedGeoCache() {
+      const allSlots = await idbGetAll('slots');
+      const used = new Set(allSlots.map(s => s.geo && s.geo.fingerprint).filter(Boolean));
+      const allFingerprints = await idbGetAllKeys('geoCache');
+      for (const fp of allFingerprints) {
+        if (!used.has(fp)) await idbDelete('geoCache', fp);
+      }
+    }
+
+    // ----- 保存 -----
+    async function saveToSlot(name) {
+      const namespace = getSaveNamespace();
+      const geoFingerprint = await computeGeoCacheEntry();
+      const gpxBlob = await gzipString(JSON.stringify(GPX_DATA));
+
+      const record = {
+        id: slotId(namespace, name),
+        namespace, name,
+        savedAt: Date.now(),
+        mapView: { lat: map.getCenter().lat, lng: map.getCenter().lng, zoom: map.getZoom(), aerialMode },
+        ui: {
+          sidebarW: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')) || 400,
+          cityPaneH: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--city-pane-h')) || 320,
+          cityFillOpacityPercent: Math.round(cityFillOpacity * 100),
+          filterText, cityFilterText, townFilterText, groupExpanded,
+          secPerUnit, restExcludeMinutes, transitSpeedKmh,
+          rateHeatmapVisible, rateAutoShown,
+        },
+        devices: {
+          DEVICES, visibility, modelColorMap, nextColorIdx, nextDeviceSeq,
+          loadedKeysArr: [...loadedKeys],
+        },
+        gpxBlob,
+        geo: { fingerprint: geoFingerprint, cityVisibility, townVisibility, csvMode },
+        sizeBytes: gpxBlob.size,
+      };
+      await idbPut('slots', record);
+      pruneUnreferencedGeoCache(); // 完了を待たずバックグラウンドで実行
+      return record;
+    }
+
+    async function listSlots() {
+      const rows = await idbGetAllByIndex('slots', 'namespace', getSaveNamespace());
+      return rows.sort((a, b) => b.savedAt - a.savedAt);
+    }
+
+    async function deleteSlot(name) {
+      await idbDelete('slots', slotId(getSaveNamespace(), name));
+      pruneUnreferencedGeoCache();
+    }
+
+    // 復元前に全状態を初期値へ戻す（clearTrackData/clearCSVReportの本体相当。
+    // confirmダイアログを介さず呼べるようにするための専用実装）
+    function resetAllStateForRestore() {
+      csvFilterGeneration++; // 実行中のapplyCSVFilter()があれば中断させる
+      clearMapLayers();
+      DEVICES = []; GROUPS = []; GPX_DATA = {}; GPX_SPEEDS = {}; GPX_AVG_SPEED = {};
+      visibility = {}; filterText = ''; groupExpanded = {};
+      modelColorMap = {}; nextColorIdx = 0; nextDeviceSeq = 0; loadedKeys = new Set();
+
+      Object.values(cityGroups).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
+      Object.values(townLayers).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
+      cityGroups = {}; cityVisibility = {}; citySetai = {}; cityCodes = {}; cityNames = {}; cityPrefCodes = {};
+      cityTownCodes = {}; cityLoadingKeys = new Set();
+      townLayers = {};
+      allFeaturesByCode = {};
+      cityKeyByTownCode = {};
+      townSetaiByCode = {};
+      loadedPrefCodes = new Set();
+      autoPrefCodes = new Set();
+      fullyFetchedPrefCodes = new Set();
+      boundaryFeatureCount = 0;
+      cityFilterText = '';
+
+      csvTowns = []; csvMode = false; townFilterText = ''; townVisibility = {}; townStageFromCSV = false;
+      townFeatureList = []; townSpatialIdx = null;
+
+      document.getElementById('trackGroup').classList.remove('loaded');
+      document.getElementById('csvReportGroup').classList.remove('loaded');
+      document.getElementById('csvReportBtn').textContent = '📊 住所コード読み込み';
+      document.getElementById('csvReportBtn').classList.remove('active');
+      document.getElementById('restDurationRow').style.display = 'none';
+      document.getElementById('secPerUnitRow').style.display = 'none';
+      document.getElementById('transitSpeedRow').style.display = 'none';
+
+      enterPrefStage();
+    }
+
+    // allFeaturesByCode + cityKeyByTownCode から市区町村レイヤーを再構築する
+    // （元のfetchをやり直さず、共有キャッシュから復元した内容だけで完結する）。
+    // ①と同じく、実際にLeafletレイヤーを構築するのは表示ON（cityVisibility）の市区町村だけにする
+    // （キャッシュにはCSV自動読込等で取得済みの非表示市区町村分も含まれうるため、それらは
+    // cityTownCodesだけ復元しておき、レイヤー自体はユーザーが後でトグルONにした時に構築する）
+    async function rebuildCityLayersFromCache() {
+      const cityFeatMap = {};
+      for (const [townCode, features] of Object.entries(allFeaturesByCode)) {
+        const key = cityKeyByTownCode[townCode];
+        if (!key) continue;
+        (cityFeatMap[key] || (cityFeatMap[key] = [])).push(...features);
+        (cityTownCodes[key] || (cityTownCodes[key] = [])).push(townCode);
+      }
+      let processed = 0;
+      for (const [key, features] of Object.entries(cityFeatMap)) {
+        if (!csvMode && cityVisibility[key]) {
+          const layer = buildCityGeoJSONLayer(features);
+          layer.addTo(map);
+          cityGroups[key] = layer;
+        }
+        processed++;
+        if (processed % 20 === 0) await yieldToUI();
+      }
+    }
+
+    async function loadFromSlot(name) {
+      const pb = document.getElementById('progress-bar'), pf = document.getElementById('progress-fill');
+      pb.style.display = 'block'; pf.style.width = '5%';
+      try {
+        const record = await idbGet('slots', slotId(getSaveNamespace(), name));
+        if (!record) { alert('セーブデータが見つかりませんでした。'); return; }
+
+        resetAllStateForRestore();
+        pf.style.width = '15%';
+
+        // --- GPX/端末データ ---
+        // JSON.parse自体は分割できないため、その前後でブラウザに制御を戻し、
+        // 続く重い処理（下記のinitMapLayers等）は各関数内部でチャンク分割してawaitする。
+        GPX_DATA = JSON.parse(await gunzipToString(record.gpxBlob));
+        DEVICES = record.devices.DEVICES;
+        visibility = record.devices.visibility;
+        modelColorMap = record.devices.modelColorMap;
+        nextColorIdx = record.devices.nextColorIdx;
+        nextDeviceSeq = record.devices.nextDeviceSeq;
+        loadedKeys = new Set(record.devices.loadedKeysArr);
+        for (let i = 0; i < DEVICES.length; i++) {
+          const dev = DEVICES[i];
+          GPX_SPEEDS[dev.key] = calcSpeeds(GPX_DATA[dev.key] || []);
+          GPX_AVG_SPEED[dev.key] = computeTrajectoryAvgSpeed(GPX_DATA[dev.key] || []);
+          if (i % 10 === 0) await yieldToUI();
+        }
+        buildGroups();
+        pf.style.width = '30%';
+        await yieldToUI();
+
+        await initMapLayers();
+        document.getElementById('trackBtn').textContent = DEVICES.length ? '🗜 GPXデータを追加する' : '🗜 GPXデータ読み込み';
+        if (DEVICES.length) document.getElementById('trackGroup').classList.add('loaded');
+        pf.style.width = '55%';
+
+        // --- 境界/住所コードデータ（共有キャッシュから復元、ZIP/CSVの再読込・再パースなし） ---
+        csvMode = record.geo.csvMode;
+        cityVisibility = record.geo.cityVisibility || {};
+        townVisibility = record.geo.townVisibility || {};
+        if (record.geo.fingerprint) {
+          const cacheEntry = await idbGet('geoCache', record.geo.fingerprint);
+          if (cacheEntry) {
+            const content = JSON.parse(await gunzipToString(cacheEntry.blob));
+            allFeaturesByCode = content.allFeaturesByCode;
+            cityKeyByTownCode = content.cityKeyByTownCode;
+            townSetaiByCode = content.townSetaiByCode;
+            cityNames = content.cityNames;
+            cityCodes = content.cityCodes;
+            cityPrefCodes = content.cityPrefCodes;
+            citySetai = content.citySetai;
+            loadedPrefCodes = new Set(content.loadedPrefCodesArr);
+            autoPrefCodes = new Set(content.autoPrefCodesArr || []);
+            boundaryFeatureCount = content.boundaryFeatureCount;
+            csvTowns = content.csvTowns;
+            pf.style.width = '65%';
+            await yieldToUI();
+
+            // 境界データ（市区町村ポリゴン）が実際にある場合のみレイヤー再構築・関連UIを有効化する
+            // （住所コードCSVのみ読み込み・境界データ未読み込みという組み合わせも元アプリの仕様上あり得るため）
+            if (boundaryFeatureCount > 0) {
+              await rebuildCityLayersFromCache();
+              buildTownSpatialIndex();
+              document.getElementById('restDurationRow').style.display = '';
+              document.getElementById('secPerUnitRow').style.display = '';
+              document.getElementById('transitSpeedRow').style.display = '';
+            }
+            pf.style.width = '80%';
+
+            if (csvMode) {
+              boundaryLevel = 'town';
+              townStageFromCSV = true;
+              document.getElementById('boundarySectionTitle').textContent = '住所コード';
+              document.getElementById('cityFilterInput').placeholder = '町丁目名で絞り込み';
+              document.getElementById('csvReportGroup').classList.add('loaded');
+              document.getElementById('csvReportBtn').classList.add('active');
+              if (boundaryFeatureCount > 0) await applyCSVFilter();
+            } else if (boundaryFeatureCount > 0) {
+              boundaryLevel = 'city';
+              document.getElementById('boundarySectionTitle').textContent = '境界設定（市区町村）';
+              document.getElementById('cityFilterInput').placeholder = '市区町村で絞り込み';
+              document.getElementById('cityCount').textContent = `${Object.keys(cityNames).length}市区町村`;
+            }
+          }
+        }
+        pf.style.width = '88%';
+
+        // --- UI状態 ---
+        const ui = record.ui;
+        filterText = ui.filterText; cityFilterText = ui.cityFilterText; townFilterText = ui.townFilterText;
+        groupExpanded = ui.groupExpanded || {};
+        document.documentElement.style.setProperty('--sidebar-w', ui.sidebarW + 'px');
+        document.documentElement.style.setProperty('--city-pane-h', ui.cityPaneH + 'px');
+        document.getElementById('cityFilterInput').value = csvMode ? townFilterText : cityFilterText;
+
+        document.getElementById('fillOpacitySlider').value = ui.cityFillOpacityPercent;
+        onFillOpacity(ui.cityFillOpacityPercent);
+
+        secPerUnit = ui.secPerUnit; restExcludeMinutes = ui.restExcludeMinutes; transitSpeedKmh = ui.transitSpeedKmh;
+        document.getElementById('secPerUnitSlider').value = secPerUnit;
+        document.getElementById('secPerUnitVal').textContent = secPerUnit + '秒';
+        document.getElementById('restDurationSlider').value = restExcludeMinutes;
+        document.getElementById('restDurationVal').textContent = restExcludeMinutes + '分';
+        document.getElementById('transitSpeedSlider').value = transitSpeedKmh;
+        document.getElementById('transitSpeedVal').textContent = transitSpeedKmh + 'km/h';
+
+        rateHeatmapVisible = !!ui.rateHeatmapVisible;
+        rateAutoShown = !!ui.rateAutoShown;
+        document.getElementById('rateHeatmapToggleBtn').classList.toggle('active', rateHeatmapVisible);
+
+        if (record.mapView.aerialMode !== aerialMode) toggleAerial();
+
+        await yieldToUI();
+        await computeVisitEstimates();
+        render();
+        map.setView([record.mapView.lat, record.mapView.lng], record.mapView.zoom, { animate: false });
+        map.invalidateSize();
+        pf.style.width = '100%';
+      } finally {
+        setTimeout(() => { pb.style.display = 'none'; pf.style.width = '0%'; }, 400);
+      }
+    }
+
+    // ----- セーブ/ロードモーダル -----
+    let slModalMode = 'save'; // 'save' | 'load'
+
+    function fmtSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+      return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    }
+    function fmtSavedAt(ms) {
+      const d = new Date(ms), z = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}/${z(d.getMonth() + 1)}/${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
+    }
+
+    async function renderSaveLoadModal() {
+      const list = document.getElementById('slModalList');
+      list.innerHTML = '<div class="sl-empty">読み込み中...</div>';
+      const slots = await listSlots();
+      list.innerHTML = '';
+      if (!slots.length) {
+        list.innerHTML = `<div class="sl-empty">まだ保存されたデータはありません${slModalMode === 'load' ? '<br>先に「保存」してください' : ''}</div>`;
+        return;
+      }
+      slots.forEach(slot => {
+        const row = document.createElement('div');
+        row.className = 'sl-row';
+        const info = document.createElement('div');
+        info.className = 'sl-info';
+        const safeName = slot.name.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+        info.innerHTML = `<div class="sl-name">${safeName}</div>` +
+          `<div class="sl-meta">${fmtSavedAt(slot.savedAt)}　端末${slot.devices.DEVICES.length}件　${fmtSize(slot.sizeBytes)}</div>`;
+        row.appendChild(info);
+        const del = document.createElement('button');
+        del.className = 'sl-del';
+        del.textContent = '削除';
+        del.addEventListener('click', async e => {
+          e.stopPropagation();
+          if (!confirm(`「${slot.name}」を削除しますか？`)) return;
+          await deleteSlot(slot.name);
+          renderSaveLoadModal();
+        });
+        row.appendChild(del);
+        row.addEventListener('click', () => {
+          if (slModalMode === 'save') {
+            if (!confirm(`「${slot.name}」に上書き保存しますか？`)) return;
+            doSave(slot.name);
+          } else {
+            if (!confirm(`「${slot.name}」を再開しますか？現在の表示内容は置き換わります。`)) return;
+            closeSaveLoadModal();
+            doLoad(slot.name);
+          }
+        });
+        list.appendChild(row);
+      });
+    }
+
+    async function doSave(name) {
+      name = (name || '').trim();
+      if (!name) return;
+      const btn = document.getElementById('saveBtn');
+      btn.style.pointerEvents = 'none';
+      btn.textContent = '⏳ 保存中...';
+      try {
+        await saveToSlot(name);
+        closeSaveLoadModal();
+        alert(`「${name}」として保存しました。`);
+      } catch (e) {
+        console.error(e);
+        alert(`保存に失敗しました。\n${e.message || e}`);
+      } finally {
+        btn.textContent = '保存';
+        btn.style.pointerEvents = '';
+      }
+    }
+
+    async function doLoad(name) {
+      const btn = document.getElementById('loadBtn');
+      btn.style.pointerEvents = 'none';
+      btn.textContent = '⏳ 読込中...';
+      try {
+        await loadFromSlot(name);
+      } catch (e) {
+        console.error(e);
+        alert(`読み込みに失敗しました。\n${e.message || e}`);
+      } finally {
+        btn.textContent = '再開';
+        btn.style.pointerEvents = '';
+      }
+    }
+
+    function openSaveModal() {
+      slModalMode = 'save';
+      const ns = getSaveNamespace();
+      document.getElementById('slModalTitle').textContent = '保存' + (ns !== 'default' ? `（区分: ${ns}）` : '');
+      document.getElementById('slModalDesc').textContent =
+        '新しい名前を付けて保存するか、既存のセーブデータをクリックして上書き保存してください。';
+      document.getElementById('slNewRow').style.display = 'flex';
+      document.getElementById('slNewName').value = '';
+      document.getElementById('saveLoadModal').classList.add('show');
+      renderSaveLoadModal();
+    }
+
+    function openLoadModal() {
+      slModalMode = 'load';
+      const ns = getSaveNamespace();
+      document.getElementById('slModalTitle').textContent = '再開' + (ns !== 'default' ? `（区分: ${ns}）` : '');
+      document.getElementById('slModalDesc').textContent = '再開するセーブデータをクリックしてください。';
+      document.getElementById('slNewRow').style.display = 'none';
+      document.getElementById('saveLoadModal').classList.add('show');
+      renderSaveLoadModal();
+    }
+
+    function closeSaveLoadModal() {
+      document.getElementById('saveLoadModal').classList.remove('show');
+    }
+
+    document.getElementById('slCancelBtn').addEventListener('click', closeSaveLoadModal);
+    document.getElementById('saveLoadModal').addEventListener('click', e => {
+      if (e.target.id === 'saveLoadModal') closeSaveLoadModal();
+    });
+    document.getElementById('slNewSaveBtn').addEventListener('click', () => {
+      doSave(document.getElementById('slNewName').value);
+    });
+    document.getElementById('slNewName').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('slNewSaveBtn').click();
+    });
+
+    // ===== 初期表示 =====
+    // 境界設定ペインは常に表示し、起動直後は都道府県トグル一覧を出しておく（データ取得不要ですぐ描画できる）
+    renderPrefStage();
+
+    // ===== ヘッダー内ネイティブツールチップの抑制 =====
+    // title属性によるブラウザ標準の吹き出しが「保存」「再開」ボタン等に重なりクリックの妨げになるため、
+    // ヘッダー上にカーソルがある間は配下要素のtitleを一時的に外し、表示自体を発生させない
+    (function suppressHeaderTooltips() {
+      const header = document.getElementById('header');
+      if (!header) return;
+      const titled = () => Array.from(header.querySelectorAll('[title]'));
+      header.addEventListener('mouseenter', () => {
+        titled().forEach(el => {
+          if (el.hasAttribute('title')) {
+            el.dataset.titleCache = el.getAttribute('title');
+            el.removeAttribute('title');
+          }
+        });
+      });
+      header.addEventListener('mouseleave', () => {
+        header.querySelectorAll('[data-title-cache]').forEach(el => {
+          el.setAttribute('title', el.dataset.titleCache);
+          delete el.dataset.titleCache;
+        });
+      });
+    })();
+  </script>
+
+  <!-- Service Worker登録 -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/GPS_tracker_public_beta/sw.js');
+    }
+  </script>
+</body>
+
+</html>
