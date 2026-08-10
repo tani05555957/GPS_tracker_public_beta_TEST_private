@@ -1341,6 +1341,8 @@
         </div>
         <button class="header-btn secondary" id="rateHeatmapToggleBtn" style="display:none" onclick="toggleRateHeatmap()"
           title="町丁目単位の充足率ヒートマップの表示/非表示を切り替えます">📊 充足率ヒートマップ</button>
+        <button class="header-btn secondary" id="rateExportBtn" style="display:none" onclick="exportRateCSV()"
+          title="読み込んだ住所コードに推定配布数・充足率を追加してCSVでダウンロードします">⬇ 充足率エクスポート</button>
         <button class="header-btn secondary" id="saveBtn" onclick="openSaveModal()" title="現在の表示内容をブラウザに保存します" style="margin-left:auto">保存</button>
         <button class="header-btn secondary" id="loadBtn" onclick="openLoadModal()" title="保存した内容を呼び出します">再開</button>
         <a class="header-btn secondary" href="マニュアル.pdf" target="_blank" rel="noopener" style="text-decoration:none"
@@ -3649,6 +3651,9 @@
         rateBtn.style.display = hasRateData ? '' : 'none';
         if (!hasRateData && rateHeatmapVisible) rateBtn.classList.remove('active');
       }
+      // エクスポートボタンは住所コード読み込み(csvMode)かつ推定配布率が算出できている場合のみ出す
+      const rateExportBtn = document.getElementById('rateExportBtn');
+      if (rateExportBtn) rateExportBtn.style.display = (csvMode && hasRateData) ? '' : 'none';
       // 集計結果が初めて得られたときだけ自動的にヒートマップをONにする（以降はユーザーの手動操作を尊重する）
       if (hasRateData && !rateAutoShown) {
         rateHeatmapVisible = true;
@@ -3659,6 +3664,30 @@
 
       applyBoundaryColorStyle();
       if (csvMode) updateTownList(); else if (boundaryLevel === 'pref') renderPrefStage(); else updateCityList();
+    }
+
+    // 読み込んだ住所コード（csvTowns）に推定配布数・充足率を追加してCSVでダウンロードする
+    function exportRateCSV() {
+      if (!csvTowns.length) return;
+      const rows = [['住所コード', '都道府県', '市区町村', '町丁目名', '配布数(実績)', '推定配布数', '充足率(%)']];
+      for (const town of csvTowns) {
+        const stat = townDeliveryStats[town.code];
+        const hasHouseholds = !!(stat && stat.households > 0);
+        const visits = hasHouseholds ? Math.round(stat.visits) : '';
+        const rate = hasHouseholds ? stat.rate.toFixed(1) : '';
+        rows.push([town.code, town.prefName, town.cityName, town.townName, town.distributionCount || '', visits, rate]);
+      }
+      const csv = rows.map(r => r.map(v => {
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',')).join('\r\n');
+      const blob = new Blob([String.fromCharCode(0xFEFF) + csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '充足率エクスポート.csv';
+      a.click();
+      URL.revokeObjectURL(url);
     }
 
     // ===== CSVレポート =====
