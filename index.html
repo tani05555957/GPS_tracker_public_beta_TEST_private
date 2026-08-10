@@ -1472,7 +1472,8 @@
 
     // CSVレポート状態
     let allFeaturesByCode = {};   // KEY_CODE文字列 → feature[]
-    let csvTowns = [];            // [{code, prefName, cityName, townName}]
+    let csvTowns = [];            // [{code, prefName, cityName, townName, distributionCount, rawCols}]
+    let csvSourceHeader = [];     // 読み込んだ住所コードCSVのヘッダー行（最初に読み込んだファイルのもの。充足率エクスポートで元の列構成をそのまま使うために保持）
     let townLayers = {};          // code → L.GeoJSON
     let townVisibility = {};      // code → bool
     let townFilterText = '';
@@ -3174,6 +3175,7 @@
       Object.values(townLayers).forEach(g => { if (map.hasLayer(g)) map.removeLayer(g); });
       townLayers = {};
       csvTowns = [];
+      csvSourceHeader = [];
       csvMode = false;
       townFilterText = '';
       townVisibility = {};
@@ -3666,16 +3668,22 @@
       if (csvMode) updateTownList(); else if (boundaryLevel === 'pref') renderPrefStage(); else updateCityList();
     }
 
-    // 読み込んだ住所コード（csvTowns）に推定配布数・充足率を追加してCSVでダウンロードする
+    // 読み込んだ住所コードCSVを元の列構成のまま、推定配布数・充足率の2列だけ追加してダウンロードする
+    // （rawCols/csvSourceHeaderが無い＝本機能追加前のセーブデータ復元時のみ、旧来の固定列にフォールバックする）
     function exportRateCSV() {
       if (!csvTowns.length) return;
-      const rows = [['住所コード', '都道府県', '市区町村', '町丁目名', '配布数(実績)', '推定配布数', '充足率(%)']];
+      const useRaw = csvSourceHeader.length > 0 && csvTowns.every(t => Array.isArray(t.rawCols));
+      const rows = [useRaw
+        ? [...csvSourceHeader, '推定配布数', '充足率(%)']
+        : ['住所コード', '都道府県', '市区町村', '町丁目名', '配布数(実績)', '推定配布数', '充足率(%)']];
       for (const town of csvTowns) {
         const stat = townDeliveryStats[town.code];
         const hasHouseholds = !!(stat && stat.households > 0);
         const visits = hasHouseholds ? Math.round(stat.visits) : '';
         const rate = hasHouseholds ? stat.rate.toFixed(1) : '';
-        rows.push([town.code, town.prefName, town.cityName, town.townName, town.distributionCount || '', visits, rate]);
+        rows.push(useRaw
+          ? [...town.rawCols, visits, rate]
+          : [town.code, town.prefName, town.cityName, town.townName, town.distributionCount || '', visits, rate]);
       }
       const csv = rows.map(r => r.map(v => {
         const s = String(v);
@@ -3822,10 +3830,14 @@
           const distributionCount = distColIdx >= 0 ? (parseInt((cols[distColIdx] || '').replace(/,/g, ''), 10) || 0) : 0;
           if (code && /^\d+$/.test(code) && !seenCodes.has(code) && !existingCodes.has(code)) {
             seenCodes.add(code);
-            newTowns.push({ code, prefName, cityName, townName, distributionCount });
+            newTowns.push({ code, prefName, cityName, townName, distributionCount, rawCols: cols });
           }
         }
         if (!newTowns.length && !csvTowns.length) throw new Error('有効な住所コードが見つかりません');
+
+        // 充足率エクスポートで元の列構成をそのまま使えるよう、最初に読み込んだファイルのヘッダーを覚えておく
+        // （追加読み込みで書式の異なるCSVが混ざるケースは想定せず、最初の1ファイル分のヘッダーを採用する）
+        if (!csvSourceHeader.length) csvSourceHeader = headerCols;
 
         if (!csvMode) {
           // 初回読み込み時のみ既存の町丁目/市区町村レイヤーをクリアする（追加読み込み時は残す）
@@ -4624,7 +4636,7 @@
         cityNames, cityCodes, cityPrefCodes, citySetai,
         loadedPrefCodesArr: [...loadedPrefCodes],
         autoPrefCodesArr: [...autoPrefCodes],
-        boundaryFeatureCount, csvTowns,
+        boundaryFeatureCount, csvTowns, csvSourceHeader,
       };
       const json = JSON.stringify(content);
       const fingerprint = hashString(json);
@@ -4711,7 +4723,7 @@
       boundaryFeatureCount = 0;
       cityFilterText = '';
 
-      csvTowns = []; csvMode = false; townFilterText = ''; townVisibility = {}; townStageFromCSV = false;
+      csvTowns = []; csvSourceHeader = []; csvMode = false; townFilterText = ''; townVisibility = {}; townStageFromCSV = false;
       townFeatureList = []; townSpatialIdx = null;
 
       document.getElementById('trackGroup').classList.remove('loaded');
@@ -4804,6 +4816,7 @@
             autoPrefCodes = new Set(content.autoPrefCodesArr || []);
             boundaryFeatureCount = content.boundaryFeatureCount;
             csvTowns = content.csvTowns;
+            csvSourceHeader = content.csvSourceHeader || [];
             pf.style.width = '65%';
             await yieldToUI();
 
